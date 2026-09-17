@@ -6,6 +6,7 @@ bin/
 *.tmp
 *.log
 .verified_head
+test_snapshots/
 
 # Media & data files (any directory)
 *.mp4

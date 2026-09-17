@@ -41,6 +41,14 @@ static-analysis:
 test:
 	go test -v ./...
 
+# Live interactive TUI snapshot tests (headless tmux)
+test-tui: build
+	ruby tools/live_tui_test.rb
+
+# Docker-based Charm VHS snapshot testing
+test-vhs: build
+	docker run --rm -v "$$(pwd):/vhs" ghcr.io/charmbracelet/vhs tools/test_tui.tape
+
 # Gated commit (runs quality gate first, stages, commits, records .verified_head)
 commit:
 	ruby tools/commit.rb "$(msg)"
