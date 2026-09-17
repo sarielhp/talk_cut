@@ -24,7 +24,7 @@ require 'json'
 class TUISnapshotTester
   attr_reader :session_name, :tmp_dir, :cols, :rows, :snapshots
 
-  def initialize(cols: 110, rows: 32, verbose: true, save_dir: nil, test_resizing: true, test_scroll: true, scroll_only: false)
+  def initialize(cols: 110, rows: 32, verbose: true, save_dir: nil, test_resizing: true, test_scroll: false, scroll_only: false)
     @cols = cols
     @rows = rows
     @verbose = verbose
@@ -114,6 +114,8 @@ class TUISnapshotTester
     # Step 6: Full 540-cue scroll test (verifying line 0 and line @rows-1 invariants)
     if @test_scroll
       test_full_transcript_scroll!
+    else
+      log_step("Full 540-cue scroll test skipped (only run on full gate or when explicitly requested)")
     end
 
     # Step 7: Switch to Metadata & Chapters view (Tab)
@@ -424,15 +426,21 @@ class TUISnapshotTester
 end
 
 if __FILE__ == $PROGRAM_NAME
-  options = { cols: 110, rows: 32, verbose: true, save_dir: nil, test_resizing: true, test_scroll: true, scroll_only: false }
+  is_full_gate = ARGV.include?('--full-gate') || ENV['FULL_GATE'] == '1'
+  options = { cols: 110, rows: 32, verbose: true, save_dir: nil, test_resizing: true, test_scroll: is_full_gate, scroll_only: false }
   OptionParser.new do |opts|
     opts.banner = 'Usage: ruby tools/live_tui_test.rb [options]'
     opts.on('--cols N', Integer, 'Terminal columns (default: 110)') { |v| options[:cols] = v }
     opts.on('--rows N', Integer, 'Terminal rows (default: 32)') { |v| options[:rows] = v }
     opts.on('-q', '--quiet', 'Suppress snapshot character grids in stdout') { options[:verbose] = false }
     opts.on('--no-resize', 'Skip terminal resizing tests') { options[:test_resizing] = false }
+    opts.on('--scroll', 'Run full 540-cue scroll test (explicitly requested)') { options[:test_scroll] = true }
     opts.on('--no-scroll', 'Skip full transcript scroll test') { options[:test_scroll] = false }
-    opts.on('--scroll-only', 'Run only the 540-cue scroll test') { options[:scroll_only] = true }
+    opts.on('--scroll-only', 'Run only the 540-cue scroll test') do
+      options[:scroll_only] = true
+      options[:test_scroll] = true
+    end
+    opts.on('--full-gate', 'Run full quality gate suite (includes 540-cue scroll test)') { options[:test_scroll] = true }
     opts.on('--save-dir DIR', String, 'Directory to save snapshot text files') { |v| options[:save_dir] = v }
     opts.on('-h', '--help', 'Show help') do
       puts opts
@@ -443,3 +451,4 @@ if __FILE__ == $PROGRAM_NAME
   tester = TUISnapshotTester.new(**options)
   tester.run!
 end
+

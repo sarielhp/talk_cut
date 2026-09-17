@@ -1,6 +1,6 @@
 # talk_cut - Talk video cutting & YouTube publishing pipeline
 
-.PHONY: all build check ci lint audit review static-analysis test test-tui test-scroll commit wip bump bump-minor bump-major clean install
+.PHONY: all build check check-full full-gate gate-full ci lint audit review static-analysis test test-tui test-scroll commit wip bump bump-minor bump-major clean install
 
 BIN_NAME := talk_cut
 GO_FILES := $(shell find . -name "*.go" -not -path "./vendor/*")
@@ -21,6 +21,13 @@ check:
 	ruby tools/check.rb
 
 ci: check
+
+# Full quality gate: fast gate + deep static-analysis + live TUI tests + full 540-cue scroll test
+check-full: build
+	ruby tools/check.rb --full
+
+full-gate: check-full
+gate-full: check-full
 
 # Sizing & cognitive complexity audit
 audit:

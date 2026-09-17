@@ -23,7 +23,9 @@ def run_cmd(name, cmd)
   [stdout, stderr]
 end
 
-puts "\e[1m=== Quality Gate (#{proj_name}) ===\e[0m"
+is_full = ARGV.include?('--full') || ARGV.include?('--all') || ENV['FULL_GATE'] == '1'
+gate_title = is_full ? 'Full Quality Gate' : 'Quality Gate'
+puts "\e[1m=== #{gate_title} (#{proj_name}) ===\e[0m"
 
 # 1. Format
 print '1. Checking format (gofmt -s)... '
@@ -118,6 +120,18 @@ if File.exist?(version_file)
     exit 1
   end
   puts "\e[32m✔\e[0m (#{ver})"
+end
+
+if is_full
+  # 9. Deep static analysis
+  print '9. Running deep static analysis (go-static-analysis)... '
+  run_cmd('Go static analysis', 'go-static-analysis')
+  puts "\e[32m✔\e[0m"
+
+  # 10. Live TUI test with full 540-cue scroll test
+  print '10. Running live TUI & full 540-cue scroll test... '
+  run_cmd('Live TUI & scroll test', 'ruby tools/live_tui_test.rb -q --scroll')
+  puts "\e[32m✔\e[0m"
 end
 
 puts "\n\e[32m✔ All quality gates passed successfully!\e[0m"
