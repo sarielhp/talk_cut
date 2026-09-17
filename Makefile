@@ -1,8 +1,8 @@
-# zoomcut - Zoom video cutting & YouTube publishing pipeline
+# talk_cut - Talk video cutting & YouTube publishing pipeline
 
 .PHONY: all build check ci lint audit review static-analysis test commit bump clean install
 
-BIN_NAME := zoomcut
+BIN_NAME := talk_cut
 GO_FILES := $(shell find . -name "*.go" -not -path "./vendor/*")
 
 all: build

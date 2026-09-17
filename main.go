@@ -1,4 +1,4 @@
-// Package main is the entry point for the zoomcut CLI tool.
+// Package main is the entry point for the talk_cut CLI tool.
 package main
 
 import (
@@ -6,7 +6,7 @@ import (
 	"os"
 )
 
-// Version is the current semantic version of zoomcut.
+// Version is the current semantic version of talk_cut.
 const Version = "0.1.0"
 
 func main() {
@@ -18,11 +18,11 @@ func main() {
 
 func run(args []string) error {
 	if len(args) > 0 && (args[0] == "-v" || args[0] == "--version") {
-		fmt.Printf("zoomcut v%s\n", Version)
+		fmt.Printf("talk_cut v%s\n", Version)
 		return nil
 	}
 
-	fmt.Printf("zoomcut v%s - Zoom Talk Trimmer & Publisher\n", Version)
+	fmt.Printf("talk_cut v%s - Talk Trimmer & Publisher\n", Version)
 	fmt.Println("Run with --help for usage instructions.")
 	return nil
 }

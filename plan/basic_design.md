@@ -1,6 +1,6 @@
-# zoomcut: Basic Design & System Architecture
+# talk_cut: Basic Design & System Architecture
 
-A semi-automated command-line and TUI tool written in Go to trim Zoom talk recordings, enrich metadata via AI, and publish them directly to YouTube with cut-adjusted chapter markers.
+A semi-automated command-line and TUI tool written in Go to trim talk recordings, enrich metadata via AI, and publish them directly to YouTube with cut-adjusted chapter markers.
 
 ---
 
@@ -11,8 +11,8 @@ Zoom recordings of academic seminars, tech talks, and webinars consistently suff
 - **Manual editing overhead**: Opening heavy video editing software (Premiere, DaVinci, iMovie) just to make 2 or 3 slice cuts is slow and tedious.
 - **Loss of chapters & metadata**: Manual upload to YouTube requires re-entering titles, speaker bios, abstracts, and recalculating chapter timestamps by hand.
 
-**`zoomcut`** automates this entire pipeline into a fast, terminal-native workflow:
-1. **Ingest**: Consumes Zoom MP4 and WebVTT transcript (plus an optional talk announcement URL).
+**`talk_cut`** automates this entire pipeline into a fast, terminal-native workflow:
+1. **Ingest**: Consumes talk video (MP4/MKV) and WebVTT transcript (plus an optional talk announcement URL).
 2. **AI Analysis**:
    - Identifies candidate cuts (intro preamble, dead air, trailing Q&A).
    - Scrapes the announcement URL to extract talk title, speaker, affiliation, and abstract.
@@ -29,7 +29,7 @@ Zoom recordings of academic seminars, tech talks, and webinars consistently suff
 ### Standard End-to-End Workflow
 
 ```bash
-zoomcut \
+talk_cut \
   --video recording.mp4 \
   --transcript recording.vtt \
   --url "https://seminar-series.org/talks/2026-spring-talk"
@@ -58,7 +58,7 @@ zoomcut \
 ### Local-Only Workflow (No YouTube Upload)
 
 ```bash
-zoomcut --video recording.mp4 --transcript recording.vtt --output clean.mp4
+talk_cut --video recording.mp4 --transcript recording.vtt --output clean.mp4
 ```
 - Performs cut review and renders `clean.mp4` locally without prompting for YouTube OAuth.
 - Dumps `clean_chapters.txt` with formatted timestamps for manual copy-pasting.
@@ -68,17 +68,15 @@ zoomcut --video recording.mp4 --transcript recording.vtt --output clean.mp4
 ## 3. System Architecture & Components
 
 ```
-zoomcut/
-├── cmd/
-│   └── zoomcut/
-│       └── main.go          # CLI entry point, flag parsing, orchestration
+talk_cut/
+├── main.go                  # CLI entry point, flag parsing, orchestration
 ├── internal/
 │   ├── ai/                  # AI client (Gemini / Anthropic / OpenAI / Ollama)
 │   │   ├── client.go        # Unified LLM provider interface
 │   │   ├── cuts.go          # Preamble, dead air & Q&A detection prompt
 │   │   └── metadata.go      # Webpage + transcript metadata extraction prompt
 │   ├── config/              # User preferences, API keys, OAuth tokens
-│   │   └── config.go        # ~/.config/zoomcut/config.json loader & store
+│   │   └── config.go        # ~/.config/talk_cut/config.json loader & store
 │   ├── cutter/              # Video processing engine
 │   │   ├── chapters.go      # Chapter timestamp recalculation post-cut
 │   │   ├── ffmpeg.go        # FFmpeg process wrapper & progress parser
@@ -200,8 +198,8 @@ Built with **Bubble Tea** and **Lip Gloss** with 24-bit True Color support:
 
 ### 4.6. YouTube API & OAuth2 (`internal/youtube`)
 - Uses official `google.golang.org/api/youtube/v3`.
-- **Client Credentials**: Looks for `~/.config/zoomcut/client_secrets.json`.
-- **One-time Browser Auth**: Spins up a local loopback listener (`http://localhost:8085/oauth2callback`), prompts user in browser, exchanges auth code for token, and writes encrypted/restricted token to `~/.config/zoomcut/youtube_token.json`.
+- **Client Credentials**: Looks for `~/.config/talk_cut/client_secrets.json`.
+- **One-time Browser Auth**: Spins up a local loopback listener (`http://localhost:8085/oauth2callback`), prompts user in browser, exchanges auth code for token, and writes encrypted/restricted token to `~/.config/talk_cut/youtube_token.json`.
 - **Resumable Upload**: Implements chunked upload using `googleapi.MediaOption` with byte tracking callbacks to feed Bubble Tea progress bars.
 
 ---

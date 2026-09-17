@@ -8,7 +8,7 @@ ENV['PATH'] = "#{File.expand_path('~/.go/bin')}:#{File.expand_path('~/go/bin')}:
 root_dir = File.expand_path('..', __dir__)
 Dir.chdir(root_dir)
 
-proj_name = 'zoomcut'
+proj_name = 'talk_cut'
 
 def run_cmd(name, cmd)
   stdout, stderr, status = Open3.capture3(cmd)
