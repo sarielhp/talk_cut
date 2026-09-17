@@ -84,6 +84,12 @@ func loadFromTalkCutConfig(cfg *Config, home string) {
 		if stored.YouTubeSecrets != "" {
 			cfg.YouTubeSecrets = stored.YouTubeSecrets
 		}
+		if stored.DefaultPrivacy != "" {
+			cfg.DefaultPrivacy = stored.DefaultPrivacy
+		}
+		if stored.PreferredLayout != "" {
+			cfg.PreferredLayout = stored.PreferredLayout
+		}
 	}
 }
 
