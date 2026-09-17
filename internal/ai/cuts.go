@@ -21,9 +21,9 @@ type rawCutProposal struct {
 
 const cutDetectionSystemPrompt = `You are an expert video editor analyzing a timestamped talk transcript.
 Your task is to identify candidate sections of the recording to cut out:
-1. Preamble/Intro fluff: Sound checks, mic checks, waiting for attendees, and introductory remarks by the seminar organizer/host before the main speaker begins their talk presentation. The cut should start at 00:00:00 and end right when the main speaker takes the floor.
-2. Post-talk/Outro fluff: After the speaker delivers their final conclusion slide or says "Thank you", cut out the subsequent Q&A session, housekeeping remarks, or casual sign-offs.
-3. Mid-talk dead pauses: Any substantial pauses or technical disruptions.
+1. Preamble/Intro fluff: Sound checks, mic checks, waiting for attendees, introductory remarks by the seminar host/organizer, AND the speaker's opening pleasantries (such as thanking the host for the introduction or invitation, expressing pleasure to be here, asking "can you hear me/see my slides?", or pre-talk banter). The preamble cut MUST start at 00:00:00 and end ONLY when the speaker begins the actual substantive presentation (introducing the research problem, motivation, or technical slides).
+2. Post-talk/Outro fluff: After the speaker delivers their final conclusion slide or says their final "Thank you", cut out all subsequent Q&A session, host concluding remarks, housekeeping notes, or casual sign-offs until the end of the recording.
+3. Mid-talk dead pauses: Any substantial pauses or technical disruptions (>= 10 seconds).
 
 Return a JSON object matching this schema:
 {
@@ -71,13 +71,13 @@ func DetectCuts(ctx context.Context, client *Client, cues []model.SubtitleCue) (
 
 // buildSampledTranscript selects head, tail, and silence-gap cues to minimize token usage.
 func buildSampledTranscript(cues []model.SubtitleCue) string {
-	if len(cues) <= 80 {
+	if len(cues) <= 120 {
 		return formatCueSlice(cues)
 	}
 
 	var sb strings.Builder
 	sb.WriteString("--- BEGINNING OF RECORDING ---\n")
-	headLimit := 40
+	headLimit := 65
 	if headLimit > len(cues) {
 		headLimit = len(cues)
 	}
@@ -86,7 +86,7 @@ func buildSampledTranscript(cues []model.SubtitleCue) string {
 	sb.WriteString("\n... [MAIN TALK PRESENTATION CONTINUES] ...\n\n")
 
 	// Scan middle for silence gaps >= 12s
-	for i := headLimit; i < len(cues)-40; i++ {
+	for i := headLimit; i < len(cues)-50; i++ {
 		gap := cues[i].Start - cues[i-1].End
 		if gap >= 12*time.Second {
 			sb.WriteString(fmt.Sprintf("[Long silence gap: %.1fs]\n", gap.Seconds()))
@@ -95,7 +95,7 @@ func buildSampledTranscript(cues []model.SubtitleCue) string {
 	}
 
 	sb.WriteString("\n--- END OF RECORDING ---\n")
-	tailStart := len(cues) - 40
+	tailStart := len(cues) - 50
 	if tailStart < headLimit {
 		tailStart = headLimit
 	}

@@ -51,7 +51,7 @@ func makeTestCues() []model.SubtitleCue {
 func TestCutsModelNavigation(t *testing.T) {
 	cues := makeTestCues()
 	media := cutter.MediaInfo{Duration: 30 * time.Second}
-	m := NewCutsModel(cues, media, "test.mp4")
+	m := NewCutsModel(cues, media, "test.mp4", "")
 	m.SetDimensions(80, 24)
 
 	if m.cursor != 0 {
@@ -92,7 +92,7 @@ func TestCutsModelNavigation(t *testing.T) {
 func TestCutsModelToggle(t *testing.T) {
 	cues := makeTestCues()
 	media := cutter.MediaInfo{Duration: 30 * time.Second}
-	m := NewCutsModel(cues, media, "test.mp4")
+	m := NewCutsModel(cues, media, "test.mp4", "")
 
 	// Initial cue #0 is ActionCut
 	if m.cues[0].Action != model.ActionCut {
@@ -115,7 +115,7 @@ func TestCutsModelToggle(t *testing.T) {
 func TestCutsModelJumpCut(t *testing.T) {
 	cues := makeTestCues() // cut at 0, keep at 1, keep at 2, cut at 3
 	media := cutter.MediaInfo{Duration: 30 * time.Second}
-	m := NewCutsModel(cues, media, "test.mp4")
+	m := NewCutsModel(cues, media, "test.mp4", "")
 
 	// Cursor at 0 (cut) -> jump to next cut
 	m, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'n'}})
@@ -139,7 +139,7 @@ func TestCutsModelJumpCut(t *testing.T) {
 func TestCutsModelView(t *testing.T) {
 	cues := makeTestCues()
 	media := cutter.MediaInfo{Duration: 30 * time.Second}
-	m := NewCutsModel(cues, media, "talk_video.mp4")
+	m := NewCutsModel(cues, media, "talk_video.mp4", "")
 	m.SetDimensions(100, 30)
 
 	view := m.View()

@@ -63,7 +63,7 @@ func NewAppModel(
 	cuts := model.BuildCutIntervals(cues)
 	return AppModel{
 		screen:    ScreenCuts,
-		cutsView:  NewCutsModel(cues, media, b.PrimaryVideo),
+		cutsView:  NewCutsModel(cues, media, b.PrimaryVideo, b.Dir),
 		metaView:  NewMetaModel(meta, cuts, defaultOutput),
 		progView:  NewProgModel(defaultOutput),
 		bundle:    b,

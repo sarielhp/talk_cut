@@ -141,15 +141,29 @@ func (c *Client) CompleteJSON(ctx context.Context, systemPrompt, userPrompt stri
 	return nil
 }
 
-// sanitizeJSONContent strips markdown code fences if the model wraps JSON in ```json ... ```
+// sanitizeJSONContent strips markdown code fences and extraneous text surrounding JSON.
 func sanitizeJSONContent(s string) string {
 	s = strings.TrimSpace(s)
-	if strings.HasPrefix(s, "```json") {
-		s = strings.TrimPrefix(s, "```json")
-		s = strings.TrimSuffix(s, "```")
-	} else if strings.HasPrefix(s, "```") {
-		s = strings.TrimPrefix(s, "```")
-		s = strings.TrimSuffix(s, "```")
+	if start := strings.Index(s, "```json"); start != -1 {
+		s = s[start+7:]
+		if end := strings.Index(s, "```"); end != -1 {
+			s = s[:end]
+		}
+		return strings.TrimSpace(s)
 	}
-	return strings.TrimSpace(s)
+	if start := strings.Index(s, "```"); start != -1 {
+		s = s[start+3:]
+		if end := strings.Index(s, "```"); end != -1 {
+			s = s[:end]
+		}
+		return strings.TrimSpace(s)
+	}
+
+	firstBrace := strings.Index(s, "{")
+	lastBrace := strings.LastIndex(s, "}")
+	if firstBrace != -1 && lastBrace != -1 && lastBrace > firstBrace {
+		return s[firstBrace : lastBrace+1]
+	}
+
+	return s
 }

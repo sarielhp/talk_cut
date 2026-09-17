@@ -38,6 +38,7 @@ type cliOptions struct {
 	noAI        bool
 	dryRun      bool
 	upload      bool
+	reDetect    bool
 	channel     string
 	keyFile     string
 	model       string
@@ -129,6 +130,7 @@ func parseCLIFlags(args []string) (*cliOptions, error) {
 	fs.BoolVar(&opts.noAI, "no-ai", false, "Disable OpenRouter AI cut detection")
 	fs.BoolVar(&opts.dryRun, "dry-run", false, "Analyze and print cut plan without opening TUI")
 	fs.BoolVar(&opts.upload, "upload", false, "Upload cut video to YouTube upon completion")
+	fs.BoolVar(&opts.reDetect, "re-detect", false, "Force re-running AI cut detection even if talk_cuts.json exists")
 	fs.StringVar(&opts.channel, "channel", "", "Target YouTube channel profile name")
 	fs.StringVar(&opts.keyFile, "key-file", "", "Custom path to auth key file")
 	fs.StringVar(&opts.model, "model", "", "OpenRouter model name")
@@ -172,8 +174,15 @@ func executePipeline(opts *cliOptions) error {
 	}
 
 	talkMeta := initialMetadata(ctx, opts, cfg)
-	if !opts.noAI {
+	if model.HasSavedCuts(opts.dir) && !opts.reDetect {
+		if savedCuts, loadErr := model.LoadCutsFile(opts.dir); loadErr == nil {
+			model.ApplyCutsToCues(cues, savedCuts)
+			cutsPath := filepath.Join(opts.dir, model.CutsFileName)
+			fmt.Printf("Loaded %d saved cut intervals from %s\n", len(savedCuts), cutsPath)
+		}
+	} else if !opts.noAI {
 		cues = runAICutDetection(ctx, cfg, cues, &talkMeta)
+		_ = model.SaveCutsFile(opts.dir, model.BuildCutIntervals(cues))
 	}
 
 	outPath := resolveOutputPath(opts.dir, b.PrimaryVideo, opts.output)
@@ -323,6 +332,7 @@ func printHelp() {
 	fmt.Println("  -u, --url <url>        Seminar announcement URL (extracts speaker, title, abstract)")
 	fmt.Println("  --layout <type>        Preferred layout: slides (default), clean, speaker, gallery")
 	fmt.Println("  --no-ai                Skip AI LLM cut detection")
+	fmt.Println("  --re-detect            Force re-running AI cut detection even if talk_cuts.json exists")
 	fmt.Println("  --dry-run              Analyze and print cut plan without opening TUI")
 	fmt.Println("  --upload               Upload cut video to YouTube upon completion")
 	fmt.Println("  --channel <name>       Target YouTube channel (stores/loads ~/.config/auth/youtube_<channel>.json)")

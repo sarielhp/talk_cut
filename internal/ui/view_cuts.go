@@ -26,6 +26,7 @@ type CutsModel struct {
 	cues         []model.SubtitleCue
 	media        cutter.MediaInfo
 	videoPath    string
+	recordingDir string
 	cursor       int
 	scrollOffset int
 	width        int
@@ -35,17 +36,18 @@ type CutsModel struct {
 }
 
 // NewCutsModel creates an initialized CutsModel.
-func NewCutsModel(cues []model.SubtitleCue, media cutter.MediaInfo, videoPath string) CutsModel {
+func NewCutsModel(cues []model.SubtitleCue, media cutter.MediaInfo, videoPath, recordingDir string) CutsModel {
 	return CutsModel{
-		theme:     DefaultTheme(),
-		keys:      DefaultKeyMap(),
-		cues:      cues,
-		media:     media,
-		videoPath: videoPath,
-		cursor:    0,
-		width:     100,
-		height:    30,
-		statusMsg: "Use j/k to navigate cues, Space to toggle cut, p to preview with ffplay, Tab for metadata",
+		theme:        DefaultTheme(),
+		keys:         DefaultKeyMap(),
+		cues:         cues,
+		media:        media,
+		videoPath:    videoPath,
+		recordingDir: recordingDir,
+		cursor:       0,
+		width:        100,
+		height:       30,
+		statusMsg:    "j/k: navigate | Space: toggle cut | p: preview ffplay | Tab: metadata",
 	}
 }
 
@@ -166,16 +168,17 @@ func (m CutsModel) pageSize() int {
 	return 1
 }
 
-// visibleLines returns the available height for cue rows.
+// visibleLines returns the available height for cue rows in the top split panel.
+// Fixed overhead: header (2), bottom cue card (6), footer (1), panel header (1) = 10 lines.
 func (m CutsModel) visibleLines() int {
-	h := m.height - 6
+	h := m.height - 10
 	if h < 5 {
 		return 5
 	}
 	return h
 }
 
-// toggleCurrent toggles the cut status of the current cue.
+// toggleCurrent toggles the cut status of the current cue and automatically persists cuts.
 func (m *CutsModel) toggleCurrent() {
 	if len(m.cues) == 0 || m.cursor < 0 || m.cursor >= len(m.cues) {
 		return
@@ -183,10 +186,14 @@ func (m *CutsModel) toggleCurrent() {
 	cue := &m.cues[m.cursor]
 	if cue.Action == model.ActionCut {
 		cue.Action = model.ActionKeep
-		m.statusMsg = fmt.Sprintf("Cue #%d marked KEEP", m.cursor+1)
+		m.statusMsg = fmt.Sprintf("Cue #%d marked KEEP (saved)", m.cursor+1)
 	} else {
 		cue.Action = model.ActionCut
-		m.statusMsg = fmt.Sprintf("Cue #%d marked CUT", m.cursor+1)
+		m.statusMsg = fmt.Sprintf("Cue #%d marked CUT (saved)", m.cursor+1)
+	}
+
+	if m.recordingDir != "" {
+		_ = model.SaveCutsFile(m.recordingDir, model.BuildCutIntervals(m.cues))
 	}
 }
 
@@ -252,13 +259,14 @@ func (m CutsModel) View() string {
 	}
 
 	header := m.renderHeader()
+	bottomCard := m.renderBottomCueCard(m.width)
 	footer := m.renderFooter()
 
-	sidebarWidth := 40
+	sidebarWidth := 38
 	if m.width > 120 {
-		sidebarWidth = 44
+		sidebarWidth = 42
 	}
-	leftWidth := m.width - sidebarWidth - 3
+	leftWidth := m.width - sidebarWidth - 2
 	if leftWidth < 30 {
 		leftWidth = 30
 	}
@@ -269,7 +277,7 @@ func (m CutsModel) View() string {
 	rightView := m.renderSidebar(sidebarWidth, stats, intervals)
 
 	body := lipgloss.JoinHorizontal(lipgloss.Top, leftView, rightView)
-	return lipgloss.JoinVertical(lipgloss.Left, header, body, footer)
+	return lipgloss.JoinVertical(lipgloss.Left, header, body, bottomCard, footer)
 }
 
 // renderHeader renders the top title bar.
@@ -280,11 +288,17 @@ func (m CutsModel) renderHeader() string {
 	return lipgloss.NewStyle().Width(m.width).MarginBottom(1).Render(bar)
 }
 
-// renderTranscript renders the scrolling transcript panel.
+// renderTranscript renders the scrolling transcript panel with exact line count.
 func (m CutsModel) renderTranscript(width int) string {
 	var lines []string
 	headerText := fmt.Sprintf(" TRANSCRIPT (%d cues) ", len(m.cues))
-	lines = append(lines, m.theme.SidebarBox.Width(width-2).Render(headerText))
+	bar := lipgloss.NewStyle().
+		Bold(true).
+		Foreground(lipgloss.Color("#FFFFFF")).
+		Background(lipgloss.Color("#334155")).
+		Width(width).
+		Render(headerText)
+	lines = append(lines, bar)
 
 	visible := m.visibleLines()
 	for i := 0; i < visible; i++ {
@@ -346,14 +360,13 @@ func (m CutsModel) cueStyle(isCur bool, action model.CutAction) lipgloss.Style {
 	return m.theme.CueNormal
 }
 
-// renderSidebar renders the right-hand panel with stats, active cue detail, and cut list.
+// renderSidebar renders the right-hand panel with fixed-height stats, cuts list, and keys.
 func (m CutsModel) renderSidebar(width int, stats model.CutStats, intervals []model.CutInterval) string {
 	statsBox := m.renderStatsBox(width, stats)
-	detailBox := m.renderDetailBox(width)
 	cutsBox := m.renderCutsBox(width, intervals)
 	helpBox := m.renderHelpBox(width)
 
-	content := lipgloss.JoinVertical(lipgloss.Left, statsBox, detailBox, cutsBox, helpBox)
+	content := lipgloss.JoinVertical(lipgloss.Left, statsBox, cutsBox, helpBox)
 	return lipgloss.NewStyle().Width(width).MarginLeft(1).Render(content)
 }
 
@@ -375,39 +388,6 @@ func (m CutsModel) renderStatsBox(width int, stats model.CutStats) string {
 	return m.theme.SidebarBox.Width(width - 2).Render("STATISTICS\n" + content)
 }
 
-// renderDetailBox formats the currently selected cue's metadata and text.
-func (m CutsModel) renderDetailBox(width int) string {
-	if len(m.cues) == 0 || m.cursor < 0 || m.cursor >= len(m.cues) {
-		return ""
-	}
-	cue := m.cues[m.cursor]
-	statusStr := "KEEP"
-	if cue.Action == model.ActionCut {
-		statusStr = "CUT"
-	} else if cue.Action == model.ActionReview {
-		statusStr = "REVIEW"
-	}
-
-	header := fmt.Sprintf("Cue #%d (%s -> %s) [%s]", m.cursor+1,
-		vtt.FormatTimestampShort(cue.Start),
-		vtt.FormatTimestampShort(cue.End),
-		statusStr,
-	)
-
-	speaker := ""
-	if cue.Speaker != "" {
-		speaker = m.theme.SpeakerStyle.Render(cue.Speaker+": ") + "\n"
-	}
-
-	text := cue.Text
-	maxChars := (width - 4) * 3
-	if len(text) > maxChars {
-		text = text[:maxChars-3] + "..."
-	}
-
-	return m.theme.SidebarBox.Width(width - 2).Render(header + "\n" + speaker + text)
-}
-
 // renderCutsBox lists active cut intervals.
 func (m CutsModel) renderCutsBox(width int, intervals []model.CutInterval) string {
 	var lines []string
@@ -416,14 +396,14 @@ func (m CutsModel) renderCutsBox(width int, intervals []model.CutInterval) strin
 	if len(intervals) == 0 {
 		lines = append(lines, "  (no cuts marked)")
 	} else {
-		maxShow := 4
+		maxShow := 3
 		for i, cut := range intervals {
 			if i >= maxShow {
 				lines = append(lines, fmt.Sprintf("  ...and %d more", len(intervals)-maxShow))
 				break
 			}
 			durSec := fmt.Sprintf("%.1fs", cut.Duration().Seconds())
-			lines = append(lines, fmt.Sprintf("  %d. %s - %s (%s)",
+			lines = append(lines, fmt.Sprintf("  %d. %s-%s (%s)",
 				i+1,
 				vtt.FormatTimestampShort(cut.Start),
 				vtt.FormatTimestampShort(cut.End),
@@ -441,6 +421,52 @@ func (m CutsModel) renderHelpBox(width int) string {
 		"[n/N]   Jump Cut   [Tab] Metadata\n" +
 		"[?]     Help       [q] Quit"
 	return m.theme.SidebarBox.Width(width - 2).Render(hints)
+}
+
+// renderBottomCueCard renders the active cue in a fixed-height card spanning the full width of the screen.
+func (m CutsModel) renderBottomCueCard(width int) string {
+	if len(m.cues) == 0 || m.cursor < 0 || m.cursor >= len(m.cues) {
+		return ""
+	}
+	cue := m.cues[m.cursor]
+
+	statusBadge := m.theme.BadgeKept.Render(" KEEP ")
+	if cue.Action == model.ActionCut {
+		statusBadge = m.theme.BadgeCut.Render(" CUT ")
+	} else if cue.Action == model.ActionReview {
+		statusBadge = m.theme.BadgeReview.Render(" REVIEW ")
+	}
+
+	durSec := fmt.Sprintf("%.2fs", cue.Duration().Seconds())
+	line1 := fmt.Sprintf(
+		"Cue #%d of %d  [%s -> %s] (%s)  %s",
+		m.cursor+1,
+		len(m.cues),
+		vtt.FormatTimestampShort(cue.Start),
+		vtt.FormatTimestampShort(cue.End),
+		durSec,
+		statusBadge,
+	)
+	if cue.CutReason != "" {
+		line1 += "  " + m.theme.HelpDesc.Render("Reason: "+cue.CutReason)
+	}
+
+	var contentLines []string
+	contentLines = append(contentLines, line1)
+
+	speakerPrefix := ""
+	if cue.Speaker != "" {
+		speakerPrefix = m.theme.SpeakerStyle.Render(cue.Speaker+": ") + " "
+	}
+	contentLines = append(contentLines, speakerPrefix+"\""+cue.Text+"\"")
+
+	cardContent := strings.Join(contentLines, "\n")
+	box := m.theme.SidebarBox.
+		Width(width - 2).
+		Height(4).
+		Render(cardContent)
+
+	return lipgloss.NewStyle().Width(width).MarginTop(1).Render(box)
 }
 
 // renderFooter renders the bottom status bar.
