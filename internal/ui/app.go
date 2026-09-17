@@ -116,6 +116,7 @@ func (a *AppModel) handleWindowSize(msg tea.WindowSizeMsg) {
 // handleKey routes key inputs based on current screen.
 func (a AppModel) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	if msg.String() == "ctrl+c" {
+		a.cutsView.Close()
 		return a, tea.Quit
 	}
 
@@ -135,6 +136,7 @@ func (a AppModel) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 func (a AppModel) handleCutsKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch msg.String() {
 	case "q":
+		a.cutsView.Close()
 		return a, tea.Quit
 	case "tab", "enter":
 		intervals := model.BuildCutIntervals(a.cutsView.Cues())
@@ -170,6 +172,7 @@ func (a AppModel) handleMetaKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 // handleProgKey processes keys on the progress screen.
 func (a AppModel) handleProgKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	if a.progView.IsDone() && (msg.String() == "q" || msg.String() == "esc") {
+		a.cutsView.Close()
 		return a, tea.Quit
 	}
 
@@ -183,6 +186,7 @@ func (a AppModel) startRender() (tea.Model, tea.Cmd) {
 	if a.isCutting {
 		return a, nil
 	}
+	a.cutsView.Close()
 	a.isCutting = true
 	a.screen = ScreenProg
 	return a, a.startCuttingPipeline()

@@ -94,6 +94,7 @@ class TUISnapshotTester
     send_key("s")
     snap = wait_for_pattern("Saved cuts to", "Save confirmation message in footer")
     assert_contains(snap, "Saved cuts to", "Status feedback confirms file saved")
+    assert_contains(snap, "SAVED", "Prominent SAVED badge shown on screen")
     verify_disk_persistence!
 
     # Step 5: Test F1 keyboard shortcuts cheat sheet

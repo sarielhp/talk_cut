@@ -4,8 +4,8 @@ package ui
 import (
 	"fmt"
 	"os/exec"
-	"path/filepath"
 	"strings"
+	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
@@ -18,6 +18,14 @@ import (
 type previewMsg struct {
 	err error
 	msg string
+}
+
+type clearStatusMsg struct{}
+
+func clearStatusCmd() tea.Cmd {
+	return tea.Tick(4*time.Second, func(time.Time) tea.Msg {
+		return clearStatusMsg{}
+	})
 }
 
 // CutsModel manages the interactive cut review screen.
@@ -33,6 +41,10 @@ type CutsModel struct {
 	width        int
 	height       int
 	statusMsg    string
+	savedAt      time.Time
+	saveFeedback string
+	saveIsError  bool
+	activePlayer *exec.Cmd
 	helpOpen     bool
 }
 
@@ -78,10 +90,17 @@ func (m CutsModel) Update(msg tea.Msg) (CutsModel, tea.Cmd) {
 		return m.handleKey(msg)
 	case previewMsg:
 		if msg.err != nil {
-			m.statusMsg = fmt.Sprintf("Preview error: %v", msg.err)
+			m.saveFeedback = fmt.Sprintf("Preview error: %v", msg.err)
+			m.saveIsError = true
 		} else {
-			m.statusMsg = msg.msg
+			m.saveFeedback = msg.msg
+			m.saveIsError = false
 		}
+		m.savedAt = time.Now()
+		return m, clearStatusCmd()
+	case clearStatusMsg:
+		m.savedAt = time.Time{}
+		m.saveFeedback = ""
 		return m, nil
 	}
 	return m, nil
@@ -103,11 +122,11 @@ func (m CutsModel) handleKey(msg tea.KeyMsg) (CutsModel, tea.Cmd) {
 	case "G", "end":
 		m.setCursor(len(m.cues) - 1)
 	case " ", "x":
-		m.toggleCurrent()
+		return m.toggleCurrent()
 	case "s", "ctrl+s":
-		m.saveCuts()
+		return m.saveCuts()
 	case "p":
-		return m, m.launchPreview()
+		return m.launchPreview()
 	case "n":
 		m.jumpCut(1)
 	case "N":
@@ -124,21 +143,32 @@ func (m CutsModel) handleKey(msg tea.KeyMsg) (CutsModel, tea.Cmd) {
 
 // SaveCuts explicitly persists current cut decisions to disk.
 func (m *CutsModel) SaveCuts() {
-	m.saveCuts()
+	_, _ = m.saveCuts()
 }
 
-// saveCuts writes cut decisions to talk_cuts.json.
-func (m *CutsModel) saveCuts() {
+// saveCuts writes cut decisions to talk_cuts.json with prominent visual feedback.
+func (m *CutsModel) saveCuts() (CutsModel, tea.Cmd) {
 	if m.recordingDir == "" {
-		m.statusMsg = "No recording directory to save cuts"
-		return
+		m.saveFeedback = "No recording directory to save cuts"
+		m.saveIsError = true
+		m.savedAt = time.Now()
+		return *m, clearStatusCmd()
 	}
 	intervals := model.BuildCutIntervals(m.cues)
 	if err := model.SaveCutsFile(m.recordingDir, intervals); err != nil {
-		m.statusMsg = fmt.Sprintf("Error saving cuts: %v", err)
+		m.saveFeedback = fmt.Sprintf("Error saving cuts: %v", err)
+		m.saveIsError = true
 	} else {
-		m.statusMsg = fmt.Sprintf("✔ Saved cuts to %s", filepath.Join(m.recordingDir, model.CutsFileName))
+		cuts := m.activeCutIntervals()
+		m.saveFeedback = fmt.Sprintf("Saved cuts to %s (%d cut region(s) - %s)",
+			model.CutsFileName,
+			len(cuts),
+			time.Now().Format("15:04:05"),
+		)
+		m.saveIsError = false
 	}
+	m.savedAt = time.Now()
+	return *m, clearStatusCmd()
 }
 
 // moveCursor adjusts the cursor by delta while preserving bounds and scroll.
@@ -208,22 +238,31 @@ func (m CutsModel) visibleLines() int {
 }
 
 // toggleCurrent toggles the cut status of the current cue and automatically persists cuts.
-func (m *CutsModel) toggleCurrent() {
+func (m *CutsModel) toggleCurrent() (CutsModel, tea.Cmd) {
 	if len(m.cues) == 0 || m.cursor < 0 || m.cursor >= len(m.cues) {
-		return
+		return *m, nil
 	}
 	cue := &m.cues[m.cursor]
+	var actionStr string
 	if cue.Action == model.ActionCut {
 		cue.Action = model.ActionKeep
-		m.statusMsg = fmt.Sprintf("Cue #%d marked KEEP (saved)", m.cursor+1)
+		actionStr = "KEEP"
 	} else {
 		cue.Action = model.ActionCut
-		m.statusMsg = fmt.Sprintf("Cue #%d marked CUT (saved)", m.cursor+1)
+		actionStr = "CUT"
 	}
 
 	if m.recordingDir != "" {
 		_ = model.SaveCutsFile(m.recordingDir, model.BuildCutIntervals(m.cues))
+		cuts := m.activeCutIntervals()
+		m.saveFeedback = fmt.Sprintf("Cue #%d marked %s (%d cut regions)", m.cursor+1, actionStr, len(cuts))
+		m.saveIsError = false
+		m.savedAt = time.Now()
+		return *m, clearStatusCmd()
 	}
+
+	m.statusMsg = fmt.Sprintf("Cue #%d marked %s", m.cursor+1, actionStr)
+	return *m, nil
 }
 
 // jumpCut moves the cursor to the next or previous cut/review interval.
@@ -261,24 +300,44 @@ func (m *CutsModel) jumpCut(direction int) {
 	}
 }
 
-// launchPreview fires an ffplay subprocess in the background starting at the cue.
-func (m CutsModel) launchPreview() tea.Cmd {
+// launchPreview fires an external video player subprocess at the active cue timestamp.
+func (m *CutsModel) launchPreview() (CutsModel, tea.Cmd) {
 	if len(m.cues) == 0 || m.cursor < 0 || m.cursor >= len(m.cues) {
-		return nil
+		return *m, nil
 	}
 	cue := m.cues[m.cursor]
 	videoPath := m.videoPath
-	return func() tea.Msg {
-		startSec := fmt.Sprintf("%.3f", cue.Start.Seconds())
-		cmd := exec.Command("ffplay", "-ss", startSec, "-autoexit", videoPath)
-		cmd.Stdin = nil
-		cmd.Stdout = nil
-		cmd.Stderr = nil
-		if err := cmd.Start(); err != nil {
-			return previewMsg{err: err}
-		}
-		return previewMsg{msg: fmt.Sprintf("Previewing at %s (ffplay)...", vtt.FormatTimestampShort(cue.Start))}
+
+	cutter.KillPreview(m.activePlayer)
+	m.activePlayer = nil
+
+	player, err := cutter.DetectPlayer()
+	if err != nil {
+		m.saveFeedback = err.Error()
+		m.saveIsError = true
+		m.savedAt = time.Now()
+		return *m, clearStatusCmd()
 	}
+
+	cmd, launchErr := cutter.LaunchPreview(player, cue.Start, videoPath)
+	if launchErr != nil {
+		m.saveFeedback = fmt.Sprintf("Preview error: %v", launchErr)
+		m.saveIsError = true
+		m.savedAt = time.Now()
+		return *m, clearStatusCmd()
+	}
+
+	m.activePlayer = cmd
+	m.saveFeedback = fmt.Sprintf("Playing at %s via %s", vtt.FormatTimestampShort(cue.Start), player.Name)
+	m.saveIsError = false
+	m.savedAt = time.Now()
+	return *m, clearStatusCmd()
+}
+
+// Close terminates any active external player process.
+func (m *CutsModel) Close() {
+	cutter.KillPreview(m.activePlayer)
+	m.activePlayer = nil
 }
 
 // View renders the complete cut review screen guaranteeing exact m.height lines.
@@ -488,194 +547,6 @@ func (m CutsModel) cueStyle(isCur bool, action model.CutAction) lipgloss.Style {
 	return m.theme.CueNormal
 }
 
-// renderSidebar renders the right-hand panel scaled to fit bodyHeight.
-func (m CutsModel) renderSidebar(width, bodyHeight int, stats model.CutStats, intervals []model.CutInterval) string {
-	statsBox := m.renderStatsBox(width, stats)
-	helpBox := m.renderHelpBox(width)
-
-	statsLines := 4
-	helpLines := 5
-	availForCuts := bodyHeight - statsLines - helpLines
-	var cutsBox string
-	if availForCuts >= 3 {
-		cutsBox = m.renderCutsBox(width, intervals, availForCuts-2)
-	}
-
-	var boxes []string
-	boxes = append(boxes, statsBox)
-	if cutsBox != "" {
-		boxes = append(boxes, cutsBox)
-	}
-	boxes = append(boxes, helpBox)
-
-	content := lipgloss.JoinVertical(lipgloss.Left, boxes...)
-	return lipgloss.NewStyle().Width(width).Height(bodyHeight).MarginLeft(1).Render(content)
-}
-
-// renderStatsBox formats the duration and cut statistics.
-func (m CutsModel) renderStatsBox(width int, stats model.CutStats) string {
-	orig := vtt.FormatTimestampShort(stats.TotalOriginal)
-	cut := vtt.FormatTimestampShort(stats.TotalCut)
-	kept := vtt.FormatTimestampShort(stats.TotalKept)
-	pct := fmt.Sprintf("%.1f%%", stats.KeptPercent())
-
-	content := fmt.Sprintf(
-		"Original: %s  Cut: %s\nKept:     %s (%s kept)",
-		m.theme.StatsValue.Render(orig),
-		m.theme.DangerText.Render("-"+cut),
-		m.theme.SuccessText.Render(kept),
-		pct,
-	)
-
-	return m.theme.SidebarBox.Width(width - 2).Render("STATISTICS\n" + content)
-}
-
-// renderCutsBox lists active cut intervals fitted to maxItems.
-func (m CutsModel) renderCutsBox(width int, intervals []model.CutInterval, maxItems int) string {
-	var lines []string
-	lines = append(lines, fmt.Sprintf("CUT REGIONS (%d)", len(intervals)))
-
-	if len(intervals) == 0 {
-		lines = append(lines, "  (no cuts marked)")
-	} else {
-		if maxItems < 1 {
-			maxItems = 1
-		}
-		for i, cut := range intervals {
-			if i >= maxItems {
-				lines = append(lines, fmt.Sprintf("  ...and %d more", len(intervals)-maxItems))
-				break
-			}
-			durSec := fmt.Sprintf("%.1fs", cut.Duration().Seconds())
-			lines = append(lines, fmt.Sprintf("  %d. %s-%s (%s)",
-				i+1,
-				vtt.FormatTimestampShort(cut.Start),
-				vtt.FormatTimestampShort(cut.End),
-				durSec,
-			))
-		}
-	}
-
-	return m.theme.SidebarBox.Width(width - 2).Render(strings.Join(lines, "\n"))
-}
-
-// renderHelpBox renders keyboard shortcut hints.
-func (m CutsModel) renderHelpBox(width int) string {
-	hints := "[Space] Cut/Keep   [s] Save\n" +
-		"[n/N]   Jump Cut   [p] Preview\n" +
-		"[Tab]   Metadata   [F1/?] Help\n" +
-		"[q]     Quit"
-	return m.theme.SidebarBox.Width(width - 2).Render(hints)
-}
-
-// renderBottomCueCard renders the active cue card spanning full width.
-func (m CutsModel) renderBottomCueCard(width, innerLines int) string {
-	if len(m.cues) == 0 || m.cursor < 0 || m.cursor >= len(m.cues) {
-		return ""
-	}
-	cue := m.cues[m.cursor]
-
-	statusBadge := m.theme.BadgeKept.Render(" ✔ KEEP ")
-	if cue.Action == model.ActionCut {
-		statusBadge = m.theme.BadgeCut.Render(" ✂ CUT ")
-	} else if cue.Action == model.ActionReview {
-		statusBadge = m.theme.BadgeReview.Render(" ? REVIEW ")
-	}
-
-	durSec := fmt.Sprintf("%.2fs", cue.Duration().Seconds())
-	line1 := fmt.Sprintf(
-		"Cue #%d of %d  [%s -> %s] (%s)  %s",
-		m.cursor+1,
-		len(m.cues),
-		vtt.FormatTimestampShort(cue.Start),
-		vtt.FormatTimestampShort(cue.End),
-		durSec,
-		statusBadge,
-	)
-
-	innerWidth := width - 4
-	if innerWidth < 20 {
-		innerWidth = 20
-	}
-
-	if cue.CutReason != "" {
-		avail := innerWidth - len(durSec) - 45
-		if avail > 10 {
-			reason := cue.CutReason
-			if len(reason) > avail {
-				reason = reason[:avail-3] + "..."
-			}
-			line1 += "  " + m.theme.HelpDesc.Render("Reason: "+reason)
-		}
-	}
-
-	speakerPrefix := ""
-	if cue.Speaker != "" {
-		speakerPrefix = m.theme.SpeakerStyle.Render(cue.Speaker+": ") + " "
-	}
-	fullText := speakerPrefix + "\"" + cue.Text + "\""
-
-	wrapped := lipgloss.NewStyle().Width(innerWidth).Render(fullText)
-	textLines := strings.Split(wrapped, "\n")
-
-	maxTextLines := innerLines - 1
-	if maxTextLines < 1 {
-		maxTextLines = 1
-	}
-	if len(textLines) > maxTextLines {
-		textLines = textLines[:maxTextLines]
-		lastIdx := maxTextLines - 1
-		if len(textLines[lastIdx]) > 3 {
-			textLines[lastIdx] = textLines[lastIdx][:len(textLines[lastIdx])-3] + "..."
-		}
-	}
-
-	contentLines := append([]string{line1}, textLines...)
-	if len(contentLines) > innerLines {
-		contentLines = contentLines[:innerLines]
-	}
-
-	cardContent := strings.Join(contentLines, "\n")
-	box := m.theme.SidebarBox.
-		Width(width - 2).
-		Height(innerLines).
-		Render(cardContent)
-
-	boxLines := strings.Split(box, "\n")
-	cardTotalHeight := innerLines + 2
-	if len(boxLines) > cardTotalHeight {
-		res := make([]string, 0, cardTotalHeight)
-		res = append(res, boxLines[0])
-		res = append(res, boxLines[1:cardTotalHeight-1]...)
-		res = append(res, boxLines[len(boxLines)-1])
-		box = strings.Join(res, "\n")
-	}
-	return box
-}
-
-// renderHelpModal renders keyboard shortcuts cheat sheet.
-func (m CutsModel) renderHelpModal(width, innerLines int) string {
-	title := m.theme.TitleStyle.Render(" KEYBOARD SHORTCUTS ") + "  " + m.theme.HelpDesc.Render("(Press F1, ?, or Esc to close)")
-	rows := []string{
-		title,
-		"  j / k       Navigate cues              Space / x   Toggle Cut / Keep (auto-saves)",
-		"  g / G       Jump top / bottom          s / Ctrl+S  Save cut decisions to talk_cuts.json",
-		"  pgdn / pgup Page down / up             p           Preview cue at timestamp (ffplay)",
-		"  n / N       Jump next / prev cut       Tab / Enter Metadata & YouTube chapters",
-		"  F1 / ?      Toggle help                q / Ctrl+C  Quit",
-	}
-	if len(rows) > innerLines {
-		rows = rows[:innerLines]
-	}
-	for len(rows) < innerLines {
-		rows = append(rows, "")
-	}
-	return m.theme.SidebarBox.
-		Width(width - 2).
-		Height(innerLines).
-		Render(strings.Join(rows, "\n"))
-}
-
 // renderFooter renders the bottom status bar (strictly 1 single line) with live cue counter.
 func (m CutsModel) renderFooter() string {
 	var cueBadge string
@@ -697,30 +568,75 @@ func (m CutsModel) renderFooter() string {
 		availRight = 0
 	}
 
-	msg := m.statusMsg
-	if msg == "" {
-		if availRight >= 68 {
-			msg = "j/k: nav | Space: cut/keep | s: save | p: preview | Tab: meta | F1: help | q: quit"
-		} else if availRight >= 45 {
-			msg = "j/k: nav | Space: cut/keep | s: save | Tab: meta | F1: help"
-		} else if availRight >= 25 {
-			msg = "j/k: nav | Space: cut | s: save"
-		} else {
-			msg = ""
-		}
+	var right string
+	hasFeedback := !m.savedAt.IsZero() && time.Since(m.savedAt) < 4*time.Second && m.saveFeedback != ""
+	if hasFeedback {
+		right = m.renderFeedbackBanner(availRight)
+	} else {
+		right = m.renderDefaultHints(availRight)
 	}
 
-	if len(msg) > availRight && availRight > 3 {
-		msg = msg[:availRight-3] + "..."
-	} else if len(msg) > availRight {
-		msg = ""
-	}
-
-	right := m.theme.HelpDesc.Render(" " + msg)
 	bar := lipgloss.JoinHorizontal(lipgloss.Center, left, right)
 	lines := strings.Split(bar, "\n")
 	if len(lines) > 1 {
 		bar = lines[0]
 	}
 	return lipgloss.NewStyle().Width(m.width).MaxHeight(1).Render(bar)
+}
+
+// renderFeedbackBanner formats the prominent status/feedback banner in the footer.
+func (m CutsModel) renderFeedbackBanner(availWidth int) string {
+	var badge lipgloss.Style
+	var textStyle lipgloss.Style
+	var badgeText string
+
+	if m.saveIsError {
+		badge = m.theme.BadgeCut
+		textStyle = m.theme.DangerText.Bold(true)
+		badgeText = " ✗ ERROR "
+	} else if strings.Contains(m.saveFeedback, "Playing") {
+		badge = m.theme.TitleStyle
+		textStyle = m.theme.PrimaryText.Bold(true)
+		badgeText = " ▶ PREVIEW "
+	} else {
+		badge = m.theme.BadgeKept
+		textStyle = m.theme.SuccessText.Bold(true)
+		badgeText = " ✔ SAVED "
+	}
+
+	bStr := badge.Render(badgeText)
+	bWidth := lipgloss.Width(bStr)
+	availText := availWidth - bWidth - 1
+	text := m.saveFeedback
+	if availText > 3 && len(text) > availText {
+		text = text[:availText-3] + "..."
+	} else if availText <= 3 {
+		text = ""
+	}
+	tStr := textStyle.Render(" " + text)
+	return lipgloss.JoinHorizontal(lipgloss.Center, bStr, tStr)
+}
+
+// renderDefaultHints formats keyboard shortcut hints tailored to terminal width.
+func (m CutsModel) renderDefaultHints(availWidth int) string {
+	msg := m.statusMsg
+	if msg == "" {
+		if availWidth >= 68 {
+			msg = "j/k: nav | Space: cut/keep | s: save | p: preview | Tab: meta | F1: help | q: quit"
+		} else if availWidth >= 45 {
+			msg = "j/k: nav | Space: cut/keep | s: save | Tab: meta | F1: help"
+		} else if availWidth >= 25 {
+			msg = "j/k: nav | Space: cut | s: save"
+		} else {
+			msg = ""
+		}
+	}
+
+	if len(msg) > availWidth && availWidth > 3 {
+		msg = msg[:availWidth-3] + "..."
+	} else if len(msg) > availWidth {
+		msg = ""
+	}
+
+	return m.theme.HelpDesc.Render(" " + msg)
 }

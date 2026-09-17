@@ -28,6 +28,7 @@ type Theme struct {
 	SidebarBox     lipgloss.Style
 	StatsLabel     lipgloss.Style
 	StatsValue     lipgloss.Style
+	PrimaryText    lipgloss.Style
 	DangerText     lipgloss.Style
 	SuccessText    lipgloss.Style
 	WarningText    lipgloss.Style
@@ -103,6 +104,7 @@ func DefaultTheme() Theme {
 		Bold(true).
 		Foreground(lipgloss.Color("#FFFFFF"))
 
+	t.PrimaryText = lipgloss.NewStyle().Foreground(t.Primary)
 	t.DangerText = lipgloss.NewStyle().Foreground(t.Danger)
 	t.SuccessText = lipgloss.NewStyle().Foreground(t.Success)
 	t.WarningText = lipgloss.NewStyle().Foreground(t.Warning)

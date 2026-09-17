@@ -177,6 +177,50 @@ func TestCutsModelSaveAndHelp(t *testing.T) {
 	if !model.HasSavedCuts(tmpDir) {
 		t.Errorf("expected talk_cuts.json to exist after 's'")
 	}
+	if !strings.Contains(m.saveFeedback, "Saved") {
+		t.Errorf("expected saveFeedback to contain 'Saved', got: %s", m.saveFeedback)
+	}
+	if m.saveIsError {
+		t.Errorf("expected saveIsError to be false")
+	}
+	banner := m.renderFeedbackBanner(80)
+	if !strings.Contains(banner, "SAVED") {
+		t.Errorf("expected feedback banner to contain SAVED, got: %s", banner)
+	}
+}
+
+func TestFeedbackBannerVariants(t *testing.T) {
+	cues := makeTestCues()
+	media := cutter.MediaInfo{Duration: 30 * time.Second}
+	m := NewCutsModel(cues, media, "talk_video.mp4", "")
+	m.SetDimensions(100, 30)
+
+	// Error variant
+	m.saveFeedback = "Failed to write file"
+	m.saveIsError = true
+	errBanner := m.renderFeedbackBanner(80)
+	if !strings.Contains(errBanner, "ERROR") || !strings.Contains(errBanner, "Failed") {
+		t.Errorf("expected error banner to contain ERROR and Failed, got: %s", errBanner)
+	}
+
+	// Preview variant
+	m.saveFeedback = "Playing at 00:03 via ffplay"
+	m.saveIsError = false
+	previewBanner := m.renderFeedbackBanner(80)
+	if !strings.Contains(previewBanner, "PREVIEW") || !strings.Contains(previewBanner, "ffplay") {
+		t.Errorf("expected preview banner to contain PREVIEW and ffplay, got: %s", previewBanner)
+	}
+}
+
+func TestCutsModelClose(t *testing.T) {
+	cues := makeTestCues()
+	media := cutter.MediaInfo{Duration: 30 * time.Second}
+	m := NewCutsModel(cues, media, "talk_video.mp4", "")
+	// Close should safely handle nil activePlayer
+	m.Close()
+	if m.activePlayer != nil {
+		t.Errorf("expected activePlayer to be nil after Close")
+	}
 }
 
 func TestCutsModelExactHeight(t *testing.T) {
