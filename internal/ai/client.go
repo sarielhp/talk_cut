@@ -26,7 +26,7 @@ type Client struct {
 func NewClient(cfg config.Config) (*Client, error) {
 	key := strings.TrimSpace(cfg.OpenRouterKey)
 	if key == "" {
-		return nil, fmt.Errorf("no OpenRouter API key found (set OPENROUTER_API_KEY or configure ~/.config/opencode-switcher)")
+		return nil, fmt.Errorf("no OpenRouter API key found (set OPENROUTER_API_KEY or configure ~/.config/talk_cut/config.json)")
 	}
 
 	baseURL := strings.TrimRight(cfg.BaseURL, "/")

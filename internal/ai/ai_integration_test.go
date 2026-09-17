@@ -17,7 +17,7 @@ func TestDetectCutsLive(t *testing.T) {
 
 	cfg, err := config.LoadConfig()
 	if err != nil || cfg.OpenRouterKey == "" {
-		t.Skip("no OpenRouter API key found in environment or opencode-switcher, skipping live test")
+		t.Skip("no OpenRouter API key found in ~/.config/talk_cut/config.json or environment, skipping live test")
 		return
 	}
 
