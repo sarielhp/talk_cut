@@ -2,6 +2,8 @@
 package ui
 
 import (
+	"regexp"
+	"strings"
 	"testing"
 	"time"
 
@@ -9,6 +11,12 @@ import (
 
 	"talk_cut/internal/model"
 )
+
+var stripANSIRegex = regexp.MustCompile(`\x1b\[[0-9;]*[a-zA-Z]|\x1b\][0-9];[^\x1b]*\x1b\\|\x1b\]8;;[^\x1b]*\x1b\\`)
+
+func stripANSI(s string) string {
+	return stripANSIRegex.ReplaceAllString(s, "")
+}
 
 func TestMetaModelFocusCycling(t *testing.T) {
 	meta := model.TalkMetadata{
@@ -100,5 +108,156 @@ func TestMetaModelValues(t *testing.T) {
 	view := m.View()
 	if view == "" {
 		t.Errorf("expected non-empty metadata view")
+	}
+}
+
+func TestMetaModelScrollingWithArrowKeys(t *testing.T) {
+	longAbstract := "A circle graph is the intersection graph of a set of chords in a circle. " +
+		"A dominating set of a graph G=(V,E) is a subset D such that every vertex is adjacent to at least one vertex of D. " +
+		"Computing a minimum dominating set is known to be NP-hard on circle graphs. In this work, we study the problem. " +
+		"We present a polynomial-time 2-approximation algorithm and develop a PTAS based on local search. " +
+		"Talk announcement: https://math.nyu.edu/dynamic/calendars/seminars/geometry-seminar/4488/"
+
+	meta := model.TalkMetadata{
+		Title:       "Dominating Sets in Circle Graphs",
+		Speaker:     "Karim Abu-Affash",
+		Affiliation: "Shamoon College of Engineering",
+		URL:         "https://math.nyu.edu/dynamic/calendars/seminars/geometry-seminar/4488/",
+		Abstract:    longAbstract,
+		Privacy:     "unlisted",
+		Tags:        []string{"Geometry", "Algorithms"},
+		Chapters: []model.ChapterMarker{
+			{OriginalTime: 0, AdjustedTime: 0, Title: "Introduction"},
+			{OriginalTime: 60 * time.Second, AdjustedTime: 50 * time.Second, Title: "Main Proof"},
+		},
+	}
+
+	m := NewMetaModel(meta, nil, "out.mp4")
+	m.SetDimensions(100, 20)
+
+	// Initial view at scrollOffset 0 shows Title
+	v0 := m.View()
+	if !strings.Contains(v0, "Dominating Sets in Circle Graphs") {
+		t.Errorf("expected Title in initial view")
+	}
+	if m.scrollOffset != 0 {
+		t.Errorf("expected initial scrollOffset 0, got %d", m.scrollOffset)
+	}
+
+	// Press down arrow 15 times to scroll into the abstract
+	abstractSeen := false
+	for i := 0; i < 15; i++ {
+		m, _ = m.Update(tea.KeyMsg{Type: tea.KeyDown})
+		v := m.View()
+		if strings.Contains(v, "intersection graph of a set of chords") {
+			abstractSeen = true
+		}
+	}
+
+	if m.scrollOffset <= 0 {
+		t.Errorf("expected scrollOffset > 0 after pressing down arrow, got %d", m.scrollOffset)
+	}
+	if !abstractSeen {
+		t.Errorf("expected abstract text to be visible while scrolling down")
+	}
+
+	// Continue scrolling down to reach Chapters and Commit button
+	commitSeen := false
+	for i := 0; i < 25; i++ {
+		m, _ = m.Update(tea.KeyMsg{Type: tea.KeyDown})
+		v := m.View()
+		if strings.Contains(stripANSI(v), "Commit & Cut Video") {
+			commitSeen = true
+		}
+	}
+	if !commitSeen {
+		t.Errorf("expected commit button to be visible after scrolling to bottom")
+	}
+
+	// Now scroll back up with Up arrow key
+	titleSeenAgain := false
+	for i := 0; i < 40; i++ {
+		m, _ = m.Update(tea.KeyMsg{Type: tea.KeyUp})
+		v := m.View()
+		if strings.Contains(v, "Dominating Sets in Circle Graphs") {
+			titleSeenAgain = true
+		}
+	}
+	if m.scrollOffset != 0 {
+		t.Errorf("expected scrollOffset 0 after scrolling back up, got %d", m.scrollOffset)
+	}
+	if !titleSeenAgain {
+		t.Errorf("expected Title to be visible again after scrolling back up")
+	}
+}
+
+func TestMetaModelURLEmbedding(t *testing.T) {
+	url := "https://math.nyu.edu/seminar/4488/"
+	embedded := embedURLs("Visit "+url+" for details.", DefaultTheme())
+
+	// OSC 8 hyperlink sequence is \x1b]8;;url\x1b\\
+	if !strings.Contains(embedded, "\x1b]8;;"+url+"\x1b\\") {
+		t.Errorf("expected OSC 8 hyperlink sequence in embedded text, got %q", embedded)
+	}
+
+	meta := model.TalkMetadata{
+		Title:    "Geometry Seminar",
+		URL:      url,
+		Abstract: "More info at " + url + ".",
+	}
+	m := NewMetaModel(meta, nil, "out.mp4")
+	m.SetDimensions(120, 30)
+
+	view := m.View()
+	// Check that view contains OSC 8 hyperlink escape codes
+	if !strings.Contains(view, "\x1b]8;;") {
+		t.Errorf("expected view to contain OSC 8 hyperlink sequences, got view:\n%s", view)
+	}
+}
+
+func TestMetaModelWholeScreenWidth(t *testing.T) {
+	meta := model.TalkMetadata{
+		Title:    "Wide Screen Seminar",
+		Abstract: "Short abstract.",
+	}
+	m := NewMetaModel(meta, nil, "out.mp4")
+	m.SetDimensions(120, 25)
+
+	view := m.View()
+	lines := strings.Split(view, "\n")
+	if len(lines) != 25 {
+		t.Errorf("expected exactly 25 lines for height 25, got %d", len(lines))
+	}
+}
+
+func TestMetaModelPageAndHomeEndKeys(t *testing.T) {
+	longAbstract := strings.Repeat("A long abstract line for testing page scrolling behavior. ", 15)
+	meta := model.TalkMetadata{
+		Title:    "Long Abstract Talk",
+		Abstract: longAbstract,
+	}
+	m := NewMetaModel(meta, nil, "out.mp4")
+	m.SetDimensions(80, 20)
+
+	// Test PageDown
+	m, _ = m.Update(tea.KeyMsg{Type: tea.KeyPgDown})
+	if m.scrollOffset <= 0 {
+		t.Errorf("expected scrollOffset > 0 after PgDown, got %d", m.scrollOffset)
+	}
+
+	// Test End key
+	m, _ = m.Update(tea.KeyMsg{Type: tea.KeyEnd})
+	endOffset := m.scrollOffset
+
+	// Test PageUp
+	m, _ = m.Update(tea.KeyMsg{Type: tea.KeyPgUp})
+	if m.scrollOffset >= endOffset {
+		t.Errorf("expected scrollOffset < endOffset after PgUp, got %d", m.scrollOffset)
+	}
+
+	// Test Home key
+	m, _ = m.Update(tea.KeyMsg{Type: tea.KeyHome})
+	if m.scrollOffset != 0 {
+		t.Errorf("expected scrollOffset 0 after Home, got %d", m.scrollOffset)
 	}
 }

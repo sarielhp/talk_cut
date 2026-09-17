@@ -266,7 +266,9 @@ func TestRenderCueRow(t *testing.T) {
 	media := cutter.MediaInfo{Duration: 30 * time.Second}
 	m := NewCutsModel(cues, media, "talk_video.mp4", "")
 	m.SetDimensions(100, 30)
+	oldProfile := lipgloss.ColorProfile()
 	lipgloss.SetColorProfile(termenv.TrueColor)
+	defer lipgloss.SetColorProfile(oldProfile)
 	cues[0].Action = model.ActionCut
 	row := m.renderCueRow(0, 100)
 	if !strings.Contains(row, "✂") {

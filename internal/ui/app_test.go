@@ -14,6 +14,7 @@ import (
 
 func TestAppModelScreenTransitions(t *testing.T) {
 	b := bundle.RecordingBundle{
+		Dir:            t.TempDir(),
 		PrimaryVideo:   "test_video.mp4",
 		TranscriptPath: "test_transcript.vtt",
 	}
