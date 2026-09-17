@@ -34,12 +34,12 @@ type ClientCredentials struct {
 }
 
 // Authorize performs the interactive browser OAuth2 loopback authentication flow.
-func Authorize(ctx context.Context, cfg config.Config, customSecrets, customToken string) error {
+func Authorize(ctx context.Context, cfg config.Config, channel, customSecrets, customToken string) error {
 	secPath := cfg.YouTubeSecrets
 	if customSecrets != "" {
 		secPath = customSecrets
 	}
-	tokPath := cfg.YouTubeTokenFile
+	tokPath := cfg.ResolveChannelTokenFile(channel)
 	if customToken != "" {
 		tokPath = customToken
 	}
@@ -74,7 +74,7 @@ func Authorize(ctx context.Context, cfg config.Config, customSecrets, customToke
 	}
 
 	cfg.YouTubeSecrets = secPath
-	cfg.YouTubeTokenFile = tokPath
+	cfg.SetChannelToken(channel, tokPath)
 	if err := cfg.SaveConfig(); err != nil {
 		return fmt.Errorf("updating config: %w", err)
 	}
@@ -235,15 +235,20 @@ func LoadToken(path string) (*oauth2.Token, error) {
 }
 
 // GetAuthenticatedClient returns an authorized http.Client with automatic token refresh.
-func GetAuthenticatedClient(ctx context.Context, cfg config.Config) (*http.Client, error) {
+func GetAuthenticatedClient(ctx context.Context, cfg config.Config, channel string) (*http.Client, error) {
 	creds, err := LoadClientCredentials(cfg.YouTubeSecrets)
 	if err != nil {
 		return nil, fmt.Errorf("loading client secrets: %w", err)
 	}
 
-	token, err := LoadToken(cfg.YouTubeTokenFile)
+	tokenFile := cfg.ResolveChannelTokenFile(channel)
+	token, err := LoadToken(tokenFile)
 	if err != nil {
-		return nil, fmt.Errorf("loading token from %q: %w (run 'talk_cut auth' to authorize)", cfg.YouTubeTokenFile, err)
+		chDesc := channel
+		if chDesc == "" {
+			chDesc = "default"
+		}
+		return nil, fmt.Errorf("loading token for channel %q from %q: %w (run 'talk_cut auth --channel %s' to authorize)", chDesc, tokenFile, err, chDesc)
 	}
 
 	conf := &oauth2.Config{

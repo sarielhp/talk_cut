@@ -38,6 +38,7 @@ type cliOptions struct {
 	noAI        bool
 	dryRun      bool
 	upload      bool
+	channel     string
 	keyFile     string
 	model       string
 	showVersion bool
@@ -76,9 +77,10 @@ func run(args []string) error {
 // runAuth executes the interactive YouTube OAuth authorization flow.
 func runAuth(args []string) error {
 	fs := flag.NewFlagSet("talk_cut auth", flag.ContinueOnError)
-	var secretsPath, tokenPath string
+	var secretsPath, tokenPath, channel string
+	fs.StringVar(&channel, "channel", "", "YouTube channel name (e.g. seminar, course, personal)")
 	fs.StringVar(&secretsPath, "secrets", "", "Path to Google Cloud client secrets JSON")
-	fs.StringVar(&tokenPath, "token", "", "Path to store OAuth token (default: ~/.config/auth/youtube_token.json)")
+	fs.StringVar(&tokenPath, "token", "", "Path to store OAuth token (default: ~/.config/auth/youtube_<channel>.json)")
 
 	if err := fs.Parse(args); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
@@ -97,12 +99,19 @@ func runAuth(args []string) error {
 	}
 
 	ctx := context.Background()
-	if err := youtube.Authorize(ctx, cfg, secretsPath, tokenPath); err != nil {
+	if err := youtube.Authorize(ctx, cfg, channel, secretsPath, tokenPath); err != nil {
 		return fmt.Errorf("authorization failed: %w", err)
 	}
 
+	targetToken := cfg.ResolveChannelTokenFile(channel)
+	chDisplay := channel
+	if chDisplay == "" {
+		chDisplay = "default"
+	}
+
 	fmt.Println("\n✔ Successfully authorized with YouTube!")
-	fmt.Printf("Token saved: %s\n", cfg.YouTubeTokenFile)
+	fmt.Printf("Channel:     %s\n", chDisplay)
+	fmt.Printf("Token saved: %s\n", targetToken)
 	fmt.Println("Config updated: ~/.config/talk_cut/config.json")
 	return nil
 }
@@ -120,6 +129,7 @@ func parseCLIFlags(args []string) (*cliOptions, error) {
 	fs.BoolVar(&opts.noAI, "no-ai", false, "Disable OpenRouter AI cut detection")
 	fs.BoolVar(&opts.dryRun, "dry-run", false, "Analyze and print cut plan without opening TUI")
 	fs.BoolVar(&opts.upload, "upload", false, "Upload cut video to YouTube upon completion")
+	fs.StringVar(&opts.channel, "channel", "", "Target YouTube channel profile name")
 	fs.StringVar(&opts.keyFile, "key-file", "", "Custom path to auth key file")
 	fs.StringVar(&opts.model, "model", "", "OpenRouter model name")
 	fs.BoolVar(&opts.showVersion, "v", false, "Print version and exit")
@@ -315,6 +325,7 @@ func printHelp() {
 	fmt.Println("  --no-ai                Skip AI LLM cut detection")
 	fmt.Println("  --dry-run              Analyze and print cut plan without opening TUI")
 	fmt.Println("  --upload               Upload cut video to YouTube upon completion")
+	fmt.Println("  --channel <name>       Target YouTube channel (stores/loads ~/.config/auth/youtube_<channel>.json)")
 	fmt.Println("  --key-file <path>      Path to OpenRouter API key file (default: ~/.config/auth/openrouter_api_key)")
 	fmt.Println("  --model <name>         OpenRouter model name (default: google/gemini-2.5-flash-lite)")
 	fmt.Println("  -v, --version          Print version information")

@@ -11,13 +11,15 @@ import (
 
 // Config stores runtime configuration parameters without embedding raw secret tokens.
 type Config struct {
-	KeyFile          string `json:"key_file"`
-	Model            string `json:"model"`
-	BaseURL          string `json:"base_url"`
-	YouTubeSecrets   string `json:"youtube_secrets"`
-	YouTubeTokenFile string `json:"youtube_token_file,omitempty"`
-	DefaultPrivacy   string `json:"default_privacy"`
-	PreferredLayout  string `json:"preferred_layout"` // "slides", "clean", "speaker", "gallery"
+	KeyFile          string            `json:"key_file"`
+	Model            string            `json:"model"`
+	BaseURL          string            `json:"base_url"`
+	YouTubeSecrets   string            `json:"youtube_secrets"`
+	YouTubeTokenFile string            `json:"youtube_token_file,omitempty"`
+	DefaultChannel   string            `json:"default_channel,omitempty"`
+	Channels         map[string]string `json:"channels,omitempty"`
+	DefaultPrivacy   string            `json:"default_privacy"`
+	PreferredLayout  string            `json:"preferred_layout"` // "slides", "clean", "speaker", "gallery"
 }
 
 // DefaultConfig returns baseline configuration settings.
@@ -84,12 +86,57 @@ func loadFromTalkCutConfig(cfg *Config, home string) {
 		if stored.YouTubeTokenFile != "" {
 			cfg.YouTubeTokenFile = stored.YouTubeTokenFile
 		}
+		if stored.DefaultChannel != "" {
+			cfg.DefaultChannel = stored.DefaultChannel
+		}
+		if stored.Channels != nil {
+			cfg.Channels = stored.Channels
+		}
 		if stored.DefaultPrivacy != "" {
 			cfg.DefaultPrivacy = stored.DefaultPrivacy
 		}
 		if stored.PreferredLayout != "" {
 			cfg.PreferredLayout = stored.PreferredLayout
 		}
+	}
+}
+
+// ResolveChannelTokenFile returns the file path for a channel's OAuth2 token.
+// If channel is empty, it uses c.DefaultChannel, or falls back to "default".
+// The token file is named ~/.config/auth/youtube_<channel>.json.
+func (c Config) ResolveChannelTokenFile(channel string) string {
+	channel = strings.TrimSpace(channel)
+	if channel == "" {
+		channel = strings.TrimSpace(c.DefaultChannel)
+	}
+	if channel == "" {
+		if c.YouTubeTokenFile != "" {
+			return c.YouTubeTokenFile
+		}
+		channel = "default"
+	}
+
+	if c.Channels != nil {
+		if path, ok := c.Channels[channel]; ok && path != "" {
+			return path
+		}
+	}
+
+	return fmt.Sprintf("~/.config/auth/youtube_%s.json", channel)
+}
+
+// SetChannelToken registers a token file path for the named channel.
+func (c *Config) SetChannelToken(channel, path string) {
+	channel = strings.TrimSpace(channel)
+	if channel == "" {
+		channel = "default"
+	}
+	if c.Channels == nil {
+		c.Channels = make(map[string]string)
+	}
+	c.Channels[channel] = path
+	if c.DefaultChannel == "" {
+		c.DefaultChannel = channel
 	}
 }
 

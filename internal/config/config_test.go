@@ -88,3 +88,29 @@ func TestGetAPIKey(t *testing.T) {
 		t.Errorf("expected env key override, got %q", envKey)
 	}
 }
+
+func TestChannelTokenResolution(t *testing.T) {
+	cfg := DefaultConfig()
+
+	// Default fallback
+	defPath := cfg.ResolveChannelTokenFile("")
+	if defPath != "~/.config/auth/youtube_token.json" {
+		t.Errorf("expected default token path, got %q", defPath)
+	}
+
+	// Specific channel name generates youtube_<channel>.json
+	seminarPath := cfg.ResolveChannelTokenFile("seminar")
+	if seminarPath != "~/.config/auth/youtube_seminar.json" {
+		t.Errorf("expected seminar token path, got %q", seminarPath)
+	}
+
+	// Setting custom channel
+	cfg.SetChannelToken("theory", "~/.config/auth/custom_theory.json")
+	if cfg.DefaultChannel != "theory" {
+		t.Errorf("expected default channel to be set to theory, got %q", cfg.DefaultChannel)
+	}
+	customPath := cfg.ResolveChannelTokenFile("theory")
+	if customPath != "~/.config/auth/custom_theory.json" {
+		t.Errorf("expected custom theory path, got %q", customPath)
+	}
+}
