@@ -6,11 +6,8 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"regexp"
 	"strings"
 )
-
-var openrouterKeyRegex = regexp.MustCompile(`OPENROUTER_API_KEY=["']?([^"'\s]+)["']?`)
 
 // Config stores runtime configuration parameters.
 type Config struct {
@@ -33,25 +30,17 @@ func DefaultConfig() Config {
 }
 
 // LoadConfig resolves configuration using prioritized resolution:
-// 1. Environment variables
-// 2. ~/.config/talk_cut/config.json
-// 3. ~/.config/opencode-switcher/ active profile (default.json -> API_key.sh)
-// 4. ~/.config/auth/openrouter_api_key
+// 1. ~/.config/talk_cut/config.json
+// 2. Environment variables (OPENROUTER_API_KEY, TALK_CUT_MODEL)
 func LoadConfig() (Config, error) {
 	cfg := DefaultConfig()
 
 	home, err := os.UserHomeDir()
 	if err == nil {
 		loadFromTalkCutConfig(&cfg, home)
-		if cfg.OpenRouterKey == "" {
-			loadFromOpenCodeSwitcher(&cfg, home)
-		}
-		if cfg.OpenRouterKey == "" {
-			loadFromAuthDir(&cfg, home)
-		}
 	}
 
-	// Environment variables always take final precedence
+	// Environment variables override file configuration
 	if envKey := os.Getenv("OPENROUTER_API_KEY"); envKey != "" {
 		cfg.OpenRouterKey = strings.TrimSpace(envKey)
 	}
@@ -89,61 +78,6 @@ func loadFromTalkCutConfig(cfg *Config, home string) {
 		}
 		if stored.PreferredLayout != "" {
 			cfg.PreferredLayout = stored.PreferredLayout
-		}
-	}
-}
-
-// loadFromOpenCodeSwitcher checks ~/.config/opencode-switcher/ for active profile and key.
-func loadFromOpenCodeSwitcher(cfg *Config, home string) {
-	switcherDir := filepath.Join(home, ".config", "opencode-switcher")
-	defaultFile := filepath.Join(switcherDir, "default.json")
-	defaultData, err := os.ReadFile(defaultFile)
-	if err != nil {
-		return
-	}
-
-	var def struct {
-		Default string `json:"default"`
-	}
-	if err := json.Unmarshal(defaultData, &def); err != nil || def.Default == "" {
-		return
-	}
-
-	profileDir := filepath.Join(switcherDir, def.Default)
-	keyScript := filepath.Join(profileDir, "API_key.sh")
-	if scriptData, err := os.ReadFile(keyScript); err == nil {
-		if matches := openrouterKeyRegex.FindStringSubmatch(string(scriptData)); len(matches) == 2 {
-			cfg.OpenRouterKey = strings.TrimSpace(matches[1])
-		}
-	}
-
-	// Read small_model or model from profile config if available
-	configFile := filepath.Join(profileDir, "config.json")
-	if confData, err := os.ReadFile(configFile); err == nil {
-		var profConf struct {
-			Model      string `json:"model"`
-			SmallModel string `json:"small_model"`
-		}
-		if err := json.Unmarshal(confData, &profConf); err == nil {
-			targetModel := profConf.SmallModel
-			if targetModel == "" {
-				targetModel = profConf.Model
-			}
-			if targetModel != "" {
-				// Strip openrouter/ prefix if present
-				cfg.Model = strings.TrimPrefix(targetModel, "openrouter/")
-			}
-		}
-	}
-}
-
-// loadFromAuthDir checks ~/.config/auth/openrouter_api_key.
-func loadFromAuthDir(cfg *Config, home string) {
-	keyPath := filepath.Join(home, ".config", "auth", "openrouter_api_key")
-	if data, err := os.ReadFile(keyPath); err == nil {
-		key := strings.TrimSpace(string(data))
-		if key != "" {
-			cfg.OpenRouterKey = key
 		}
 	}
 }

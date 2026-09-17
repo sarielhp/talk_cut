@@ -14,34 +14,29 @@ func TestDefaultConfig(t *testing.T) {
 	if cfg.Model == "" {
 		t.Errorf("expected non-empty Model")
 	}
+	if cfg.DefaultPrivacy != "unlisted" {
+		t.Errorf("expected unlisted default privacy, got %q", cfg.DefaultPrivacy)
+	}
 }
 
-func TestLoadConfigFromSwitcher(t *testing.T) {
+func TestLoadConfig(t *testing.T) {
 	tempHome := t.TempDir()
 	t.Setenv("HOME", tempHome)
 	t.Setenv("OPENROUTER_API_KEY", "")
+	t.Setenv("TALK_CUT_MODEL", "")
 
-	// Create fake opencode-switcher structure
-	switcherDir := filepath.Join(tempHome, ".config", "opencode-switcher")
-	profileDir := filepath.Join(switcherDir, "05")
-	if err := os.MkdirAll(profileDir, 0o755); err != nil {
+	// Create fake ~/.config/talk_cut/config.json
+	confDir := filepath.Join(tempHome, ".config", "talk_cut")
+	if err := os.MkdirAll(confDir, 0o755); err != nil {
 		t.Fatalf("failed creating test dir: %v", err)
 	}
 
-	defJSON := `{"default": "05"}`
-	if err := os.WriteFile(filepath.Join(switcherDir, "default.json"), []byte(defJSON), 0o644); err != nil {
-		t.Fatalf("failed writing default.json: %v", err)
-	}
-
-	apiScript := `#!/usr/bin/env bash
-export OPENROUTER_API_KEY="sk-or-v1-test-key-12345"
-`
-	if err := os.WriteFile(filepath.Join(profileDir, "API_key.sh"), []byte(apiScript), 0o644); err != nil {
-		t.Fatalf("failed writing API_key.sh: %v", err)
-	}
-
-	confJSON := `{"small_model": "openrouter/google/gemini-2.5-flash-lite"}`
-	if err := os.WriteFile(filepath.Join(profileDir, "config.json"), []byte(confJSON), 0o644); err != nil {
+	confJSON := `{
+		"openrouter_key": "sk-or-v1-file-key",
+		"model": "deepseek/deepseek-chat",
+		"default_privacy": "private"
+	}`
+	if err := os.WriteFile(filepath.Join(confDir, "config.json"), []byte(confJSON), 0o600); err != nil {
 		t.Fatalf("failed writing config.json: %v", err)
 	}
 
@@ -50,10 +45,28 @@ export OPENROUTER_API_KEY="sk-or-v1-test-key-12345"
 		t.Fatalf("LoadConfig failed: %v", err)
 	}
 
-	if cfg.OpenRouterKey != "sk-or-v1-test-key-12345" {
-		t.Errorf("expected key from switcher, got %q", cfg.OpenRouterKey)
+	if cfg.OpenRouterKey != "sk-or-v1-file-key" {
+		t.Errorf("expected key from file, got %q", cfg.OpenRouterKey)
 	}
-	if cfg.Model != "google/gemini-2.5-flash-lite" {
-		t.Errorf("expected model from switcher, got %q", cfg.Model)
+	if cfg.Model != "deepseek/deepseek-chat" {
+		t.Errorf("expected model from file, got %q", cfg.Model)
+	}
+	if cfg.DefaultPrivacy != "private" {
+		t.Errorf("expected privacy from file, got %q", cfg.DefaultPrivacy)
+	}
+
+	// Test environment variable override
+	t.Setenv("OPENROUTER_API_KEY", "sk-or-v1-env-override")
+	t.Setenv("TALK_CUT_MODEL", "google/gemini-2.5-flash")
+
+	cfgEnv, err := LoadConfig()
+	if err != nil {
+		t.Fatalf("LoadConfig with env failed: %v", err)
+	}
+	if cfgEnv.OpenRouterKey != "sk-or-v1-env-override" {
+		t.Errorf("expected env override key, got %q", cfgEnv.OpenRouterKey)
+	}
+	if cfgEnv.Model != "google/gemini-2.5-flash" {
+		t.Errorf("expected env override model, got %q", cfgEnv.Model)
 	}
 }
