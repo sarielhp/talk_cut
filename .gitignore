@@ -1,0 +1,31 @@
+# Binaries
+zoomcut
+bin/
+
+# Temporary and build files
+*.tmp
+*.log
+.verified_head
+
+# Media & data files (any directory)
+*.mp4
+*.m4a
+*.mkv
+*.webm
+*.mov
+*.avi
+
+# Local examples and test recordings
+examples/
+example/
+
+# Credentials & secrets
+client_secrets.json
+*token*.json
+credentials.json
+.env
+
+# OS / Editor
+.DS_Store
+.idea/
+.vscode/
