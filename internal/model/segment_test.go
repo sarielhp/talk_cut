@@ -68,3 +68,22 @@ func TestChapterFormat(t *testing.T) {
 		})
 	}
 }
+
+func TestApplyCutsToCues(t *testing.T) {
+	cues := []SubtitleCue{
+		{ID: 1, Start: 0, End: 5 * time.Second, Action: ActionKeep},
+		{ID: 2, Start: 5 * time.Second, End: 10 * time.Second, Action: ActionKeep},
+		{ID: 3, Start: 10 * time.Second, End: 20 * time.Second, Action: ActionKeep},
+	}
+	cuts := []CutInterval{
+		{Start: 0, End: 6 * time.Second, Action: ActionCut, Reason: "Intro"},
+	}
+
+	ApplyCutsToCues(cues, cuts)
+	if cues[0].Action != ActionCut || cues[0].CutReason != "Intro" {
+		t.Errorf("expected cue 0 cut, got %s", cues[0].Action)
+	}
+	if cues[1].Action != ActionKeep {
+		t.Errorf("expected cue 1 kept, got %s", cues[1].Action)
+	}
+}

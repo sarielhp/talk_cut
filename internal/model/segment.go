@@ -35,6 +35,14 @@ type CutStats struct {
 	CutCount      int
 }
 
+// KeptPercent returns the percentage of total media duration retained.
+func (s CutStats) KeptPercent() float64 {
+	if s.TotalOriginal <= 0 {
+		return 100.0
+	}
+	return (float64(s.TotalKept) / float64(s.TotalOriginal)) * 100.0
+}
+
 // ComputeStats calculates aggregate cut statistics across a slice of cues.
 func ComputeStats(cues []SubtitleCue, mediaDuration time.Duration) CutStats {
 	stats := CutStats{
@@ -100,4 +108,18 @@ func BuildCutIntervals(cues []SubtitleCue) []CutInterval {
 
 	intervals = append(intervals, current)
 	return intervals
+}
+
+// ApplyCutsToCues updates the Action and CutReason on each cue whose midpoint falls within a cut interval.
+func ApplyCutsToCues(cues []SubtitleCue, cuts []CutInterval) {
+	for i := range cues {
+		mid := (cues[i].Start + cues[i].End) / 2
+		for _, cut := range cuts {
+			if cut.Action == ActionCut && mid >= cut.Start && mid <= cut.End {
+				cues[i].Action = ActionCut
+				cues[i].CutReason = cut.Reason
+				break
+			}
+		}
+	}
 }

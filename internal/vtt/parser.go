@@ -5,6 +5,7 @@ import (
 	"bufio"
 	"fmt"
 	"io"
+	"os"
 	"regexp"
 	"strconv"
 	"strings"
@@ -12,6 +13,16 @@ import (
 
 	"talk_cut/internal/model"
 )
+
+// ParseFile opens a WebVTT file from disk and parses its cues.
+func ParseFile(path string) ([]model.SubtitleCue, error) {
+	f, err := os.Open(path)
+	if err != nil {
+		return nil, fmt.Errorf("opening vtt file %q: %w", path, err)
+	}
+	defer f.Close()
+	return Parse(f)
+}
 
 var (
 	tagRegex     = regexp.MustCompile(`<[^>]+>`)
