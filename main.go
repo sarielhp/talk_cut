@@ -2,12 +2,17 @@
 package main
 
 import (
+	_ "embed"
 	"fmt"
 	"os"
+	"strings"
 )
 
+//go:embed VERSION
+var rawVersion string
+
 // Version is the current semantic version of talk_cut.
-const Version = "0.0.1"
+var Version = strings.TrimSpace(rawVersion)
 
 func main() {
 	if err := run(os.Args[1:]); err != nil {

@@ -108,23 +108,16 @@ unless s.success?
 end
 puts "\e[32m✔\e[0m"
 
-# 8. Version consistency
+# 8. Semantic version validation
 version_file = File.join(root_dir, 'VERSION')
 if File.exist?(version_file)
-  print '8. Checking version consistency... '
+  print '8. Validating semantic version... '
   ver = File.read(version_file).strip
-  main_file = File.join(root_dir, 'main.go')
-  if File.exist?(main_file)
-    main_content = File.read(main_file)
-    if main_content =~ /Version\s*=\s*"([^"]+)"/
-      code_ver = Regexp.last_match(1)
-      if ver != code_ver
-        puts "\n\e[31m✗ Version mismatch: VERSION=#{ver}, main.go=#{code_ver}\e[0m"
-        exit 1
-      end
-    end
+  unless ver =~ /\A\d+\.\d+\.\d+\z/
+    puts "\n\e[31m✗ Invalid semantic version in VERSION: #{ver}\e[0m"
+    exit 1
   end
-  puts "\e[32m✔\e[0m"
+  puts "\e[32m✔\e[0m (#{ver})"
 end
 
 puts "\n\e[32m✔ All quality gates passed successfully!\e[0m"

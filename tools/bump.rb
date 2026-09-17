@@ -46,15 +46,6 @@ new_version = parts.join('.')
 # Update VERSION file
 File.write(version_file, "#{new_version}\n")
 
-# Update main.go Version literal if present
-main_go = File.join(root_dir, 'main.go')
-if File.exist?(main_go)
-  content = File.read(main_go)
-  content.sub!(/(Version\s*=\s*)"[^"]+"/, "\\1\"#{new_version}\"")
-  File.write(main_go, content)
-  Open3.capture3("gofmt -s -w #{main_go}")
-end
-
 # Check if quality gate can be skipped via .verified_head
 verified_head_file = File.join(root_dir, '.verified_head')
 can_skip_gate = false
@@ -65,7 +56,7 @@ if File.exist?(verified_head_file)
   if verified_sha == current_sha
     status_out = `git status --porcelain`.strip
     modified_files = status_out.lines.map { |l| l.strip.split(/\s+/).last }
-    allowed = ['VERSION', 'main.go']
+    allowed = ['VERSION']
     can_skip_gate = (modified_files - allowed).empty?
   end
 end
@@ -80,9 +71,7 @@ if !can_skip_gate && File.exist?(gate_script)
 end
 
 # Stage and commit version bump
-files_to_add = ['VERSION']
-files_to_add << 'main.go' if File.exist?(main_go)
-`git add #{files_to_add.join(' ')}`
+`git add VERSION`
 
 commit_title = "chore: bump version to #{new_version} (#{mode})"
 commit_title += " - #{custom_msg}" if custom_msg && !custom_msg.empty?
