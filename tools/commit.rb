@@ -3,14 +3,32 @@
 
 require 'open3'
 
-msg = ARGV.join(' ').strip
-if msg.empty?
-  warn "Usage: #{$PROGRAM_NAME} <commit-message>"
-  exit 1
-end
-
 root_dir = File.expand_path('..', __dir__)
 Dir.chdir(root_dir)
+
+# Check if there are uncommitted changes
+status_out, _, _ = Open3.capture3('git status --porcelain')
+changed_lines = status_out.lines.map(&:strip).reject(&:empty?)
+
+if changed_lines.empty?
+  puts "Nothing to commit, working tree clean."
+  exit 0
+end
+
+msg = ARGV.join(' ').strip
+
+# Auto-generate a descriptive WIP summary if no message was supplied
+if msg.empty?
+  file_paths = changed_lines.map { |l| l.sub(/\A\S+\s+/, '').strip }
+  dirs = file_paths.map do |path|
+    dir = File.dirname(path)
+    dir == '.' ? File.basename(path) : dir
+  end.uniq
+
+  summary_target = dirs.first(3).join(', ')
+  summary_target += " (+#{dirs.size - 3} more)" if dirs.size > 3
+  msg = "wip: update #{summary_target} (#{file_paths.size} file#{file_paths.size == 1 ? '' : 's'})"
+end
 
 # 1. Quality gate
 gate_script = File.join(root_dir, 'tools', 'check.rb')

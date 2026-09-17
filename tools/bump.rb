@@ -6,6 +6,16 @@ require 'open3'
 root_dir = File.expand_path('..', __dir__)
 Dir.chdir(root_dir)
 
+# Parse bump mode: patch (default), minor, major
+mode = 'patch'
+custom_msg = nil
+
+args = ARGV.dup
+if args.first =~ /\A(patch|minor|major)\z/i
+  mode = args.shift.downcase
+end
+custom_msg = args.join(' ').strip unless args.empty?
+
 version_file = File.join(root_dir, 'VERSION')
 unless File.exist?(version_file)
   warn "Error: VERSION file not found at #{version_file}"
@@ -15,7 +25,22 @@ end
 current_version = File.read(version_file).strip
 parts = current_version.split('.').map(&:to_i)
 parts << 0 while parts.size < 3
-parts[-1] += 1
+
+case mode
+when 'major'
+  parts[0] += 1
+  parts[1] = 0
+  parts[2] = 0
+when 'minor'
+  parts[1] += 1
+  parts[2] = 0
+when 'patch'
+  parts[2] += 1
+else
+  warn "Unknown bump mode: #{mode}. Use 'patch', 'minor', or 'major'."
+  exit 1
+end
+
 new_version = parts.join('.')
 
 # Update VERSION file
@@ -59,7 +84,10 @@ files_to_add = ['VERSION']
 files_to_add << 'main.go' if File.exist?(main_go)
 `git add #{files_to_add.join(' ')}`
 
-commit_out, commit_err, s = Open3.capture3('git', 'commit', '-m', "chore: bump version to #{new_version}")
+commit_title = "chore: bump version to #{new_version} (#{mode})"
+commit_title += " - #{custom_msg}" if custom_msg && !custom_msg.empty?
+
+commit_out, commit_err, s = Open3.capture3('git', 'commit', '-m', commit_title)
 unless s.success?
   warn 'git commit failed during bump'
   warn commit_out unless commit_out.empty?
@@ -87,5 +115,5 @@ if File.exist?(File.join(root_dir, 'Makefile')) && File.read(File.join(root_dir,
   system('make install')
 end
 
-puts "\e[32m✔ Bumped version to #{new_version}\e[0m"
+puts "\e[32m✔ Bumped version from #{current_version} to #{new_version} [#{mode}]\e[0m"
 exit 0

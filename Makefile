@@ -1,6 +1,6 @@
 # talk_cut - Talk video cutting & YouTube publishing pipeline
 
-.PHONY: all build check ci lint audit review static-analysis test commit bump clean install
+.PHONY: all build check ci lint audit review static-analysis test commit wip bump bump-minor bump-major clean install
 
 BIN_NAME := talk_cut
 GO_FILES := $(shell find . -name "*.go" -not -path "./vendor/*")
@@ -45,9 +45,21 @@ test:
 commit:
 	ruby tools/commit.rb "$(msg)"
 
-# Increment patch version, verify, commit, and install
+# Quick WIP commit (auto-generates summary if no msg provided)
+wip:
+	ruby tools/commit.rb $(if $(msg),"wip: $(msg)","")
+
+# Increment patch version (0.0.1 -> 0.0.2), verify, commit, and install
 bump:
-	ruby tools/bump.rb
+	ruby tools/bump.rb patch "$(msg)"
+
+# Increment minor version (0.0.X -> 0.1.0), verify, commit, and install
+bump-minor:
+	ruby tools/bump.rb minor "$(msg)"
+
+# Increment major version (0.X.Y -> 1.0.0), verify, commit, and install
+bump-major:
+	ruby tools/bump.rb major "$(msg)"
 
 clean:
 	go clean

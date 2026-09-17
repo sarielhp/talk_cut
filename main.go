@@ -7,7 +7,7 @@ import (
 )
 
 // Version is the current semantic version of talk_cut.
-const Version = "0.1.0"
+const Version = "0.0.1"
 
 func main() {
 	if err := run(os.Args[1:]); err != nil {
