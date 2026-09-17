@@ -2,10 +2,13 @@
 package ui
 
 import (
+	"strings"
 	"testing"
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
+	"github.com/muesli/termenv"
 
 	"talk_cut/internal/cutter"
 	"talk_cut/internal/model"
@@ -149,5 +152,94 @@ func TestCutsModelView(t *testing.T) {
 
 	if len(m.Cues()) != len(cues) {
 		t.Errorf("expected %d cues, got %d", len(cues), len(m.Cues()))
+	}
+}
+
+func TestCutsModelSaveAndHelp(t *testing.T) {
+	cues := makeTestCues()
+	media := cutter.MediaInfo{Duration: 30 * time.Second}
+	tmpDir := t.TempDir()
+	m := NewCutsModel(cues, media, "talk_video.mp4", tmpDir)
+	m.SetDimensions(100, 30)
+
+	// Test F1 toggles help
+	m, _ = m.Update(tea.KeyMsg{Type: tea.KeyF1})
+	if !m.helpOpen {
+		t.Errorf("expected helpOpen to be true after F1")
+	}
+	m, _ = m.Update(tea.KeyMsg{Type: tea.KeyEsc})
+	if m.helpOpen {
+		t.Errorf("expected helpOpen to be false after Esc")
+	}
+
+	// Test s saves cuts to disk
+	m, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'s'}})
+	if !model.HasSavedCuts(tmpDir) {
+		t.Errorf("expected talk_cuts.json to exist after 's'")
+	}
+}
+
+func TestCutsModelExactHeight(t *testing.T) {
+	cues := makeTestCues()
+	// Add a very long cue to test text wrapping and dynamic trimming
+	cues = append(cues, model.SubtitleCue{
+		ID:      5,
+		Start:   25 * time.Second,
+		End:     50 * time.Second,
+		Speaker: "Alice",
+		Text: "This is an extremely long subtitle cue text designed to test multi-line text wrapping " +
+			"in the bottom cue card. It spans across multiple sentences and paragraphs to verify that " +
+			"when the card expands to accommodate long text, the transcript above trims its visible rows " +
+			"and the entire layout string never exceeds the target terminal height.",
+		CutReason: "Preamble and speaker pleasantries with long description",
+		Action:    model.ActionCut,
+	})
+
+	media := cutter.MediaInfo{Duration: 60 * time.Second}
+	for _, height := range []int{24, 30, 35} {
+		m := NewCutsModel(cues, media, "talk_video.mp4", "")
+		m.SetDimensions(100, height)
+
+		// Check initial view height
+		v := m.View()
+		lineCount := len(strings.Split(v, "\n"))
+		if lineCount != height {
+			t.Errorf("height %d: expected %d lines, got %d", height, height, lineCount)
+		}
+
+		// Navigate to the long cue and verify height remains identical
+		m.setCursor(len(cues) - 1)
+		v2 := m.View()
+		lineCount2 := len(strings.Split(v2, "\n"))
+		if lineCount2 != height {
+			t.Errorf("height %d with long cue: expected %d lines, got %d", height, height, lineCount2)
+		}
+	}
+}
+
+func TestRenderCueRow(t *testing.T) {
+	cues := makeTestCues()
+	media := cutter.MediaInfo{Duration: 30 * time.Second}
+	m := NewCutsModel(cues, media, "talk_video.mp4", "")
+	m.SetDimensions(100, 30)
+	lipgloss.SetColorProfile(termenv.TrueColor)
+	cues[0].Action = model.ActionCut
+	row := m.renderCueRow(0, 100)
+	if !strings.Contains(row, "✂") {
+		t.Errorf("expected row to contain ✂, got: %s", row)
+	}
+	cleanRow0 := strings.ReplaceAll(row, "\x1b[", "")
+	if strings.Contains(cleanRow0, "[1;38;") {
+		t.Errorf("row contains leaked ANSI escape text: %s", cleanRow0)
+	}
+
+	cues[1].Action = model.ActionKeep
+	row1 := m.renderCueRow(1, 100)
+	if !strings.Contains(row1, "✔") {
+		t.Errorf("expected row1 to contain ✔, got: %s", row1)
+	}
+	cleanRow1 := strings.ReplaceAll(row1, "\x1b[", "")
+	if strings.Contains(cleanRow1, "[1;38;") {
+		t.Errorf("row1 contains leaked ANSI escape text: %s", cleanRow1)
 	}
 }

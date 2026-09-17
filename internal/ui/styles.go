@@ -36,6 +36,9 @@ type Theme struct {
 	BadgeKept      lipgloss.Style
 	BadgeCut       lipgloss.Style
 	BadgeReview    lipgloss.Style
+	IconKept       lipgloss.Style
+	IconCut        lipgloss.Style
+	IconReview     lipgloss.Style
 }
 
 // DefaultTheme returns a polished 24-bit dark theme.
@@ -71,12 +74,10 @@ func DefaultTheme() Theme {
 		Background(lipgloss.Color("#334155"))
 
 	t.CueCut = lipgloss.NewStyle().
-		Strikethrough(true).
 		Foreground(t.Danger)
 
 	t.CueCutSelected = lipgloss.NewStyle().
 		Bold(true).
-		Strikethrough(true).
 		Foreground(t.Danger).
 		Background(lipgloss.Color("#451A1A"))
 
@@ -130,6 +131,18 @@ func DefaultTheme() Theme {
 		Foreground(lipgloss.Color("#78350F")).
 		Background(t.Warning).
 		Padding(0, 1)
+
+	t.IconKept = lipgloss.NewStyle().
+		Bold(true).
+		Foreground(t.Success)
+
+	t.IconCut = lipgloss.NewStyle().
+		Bold(true).
+		Foreground(t.Danger)
+
+	t.IconReview = lipgloss.NewStyle().
+		Bold(true).
+		Foreground(t.Warning)
 
 	return t
 }

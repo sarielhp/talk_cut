@@ -4,6 +4,7 @@ package ui
 import (
 	"fmt"
 	"os/exec"
+	"path/filepath"
 	"strings"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -103,16 +104,41 @@ func (m CutsModel) handleKey(msg tea.KeyMsg) (CutsModel, tea.Cmd) {
 		m.setCursor(len(m.cues) - 1)
 	case " ", "x":
 		m.toggleCurrent()
+	case "s", "ctrl+s":
+		m.saveCuts()
 	case "p":
 		return m, m.launchPreview()
 	case "n":
 		m.jumpCut(1)
 	case "N":
 		m.jumpCut(-1)
-	case "?":
+	case "?", "f1":
 		m.helpOpen = !m.helpOpen
+	case "esc":
+		if m.helpOpen {
+			m.helpOpen = false
+		}
 	}
 	return m, nil
+}
+
+// SaveCuts explicitly persists current cut decisions to disk.
+func (m *CutsModel) SaveCuts() {
+	m.saveCuts()
+}
+
+// saveCuts writes cut decisions to talk_cuts.json.
+func (m *CutsModel) saveCuts() {
+	if m.recordingDir == "" {
+		m.statusMsg = "No recording directory to save cuts"
+		return
+	}
+	intervals := model.BuildCutIntervals(m.cues)
+	if err := model.SaveCutsFile(m.recordingDir, intervals); err != nil {
+		m.statusMsg = fmt.Sprintf("Error saving cuts: %v", err)
+	} else {
+		m.statusMsg = fmt.Sprintf("✔ Saved cuts to %s", filepath.Join(m.recordingDir, model.CutsFileName))
+	}
 }
 
 // moveCursor adjusts the cursor by delta while preserving bounds and scroll.
@@ -147,7 +173,11 @@ func (m *CutsModel) setCursor(pos int) {
 
 // adjustScroll ensures the active cursor is visible within the viewport.
 func (m *CutsModel) adjustScroll() {
-	visible := m.visibleLines()
+	m.adjustScrollTo(m.visibleLines())
+}
+
+// adjustScrollTo aligns scroll offset with a specific visible line count.
+func (m *CutsModel) adjustScrollTo(visible int) {
 	if visible <= 0 {
 		return
 	}
@@ -169,7 +199,6 @@ func (m CutsModel) pageSize() int {
 }
 
 // visibleLines returns the available height for cue rows in the top split panel.
-// Fixed overhead: header (2), bottom cue card (6), footer (1), panel header (1) = 10 lines.
 func (m CutsModel) visibleLines() int {
 	h := m.height - 10
 	if h < 5 {
@@ -252,15 +281,43 @@ func (m CutsModel) launchPreview() tea.Cmd {
 	}
 }
 
-// View renders the complete cut review screen.
+// View renders the complete cut review screen guaranteeing exact m.height lines.
 func (m CutsModel) View() string {
 	if m.width <= 0 || m.height <= 0 {
 		return "Initializing talk_cut..."
 	}
 
 	header := m.renderHeader()
-	bottomCard := m.renderBottomCueCard(m.width)
 	footer := m.renderFooter()
+
+	var activeCue model.SubtitleCue
+	if len(m.cues) > 0 && m.cursor >= 0 && m.cursor < len(m.cues) {
+		activeCue = m.cues[m.cursor]
+	}
+
+	cardHeight, innerLines := m.computeCardHeight(m.width, activeCue)
+	bodyHeight := m.height - 2 - cardHeight
+	if bodyHeight < 6 {
+		bodyHeight = 6
+		cardHeight = m.height - 2 - bodyHeight
+		if cardHeight < 4 {
+			cardHeight = 4
+		}
+		innerLines = cardHeight - 2
+	}
+
+	var bottomCard string
+	if m.helpOpen {
+		cardHeight = 8
+		if cardHeight > m.height-8 {
+			cardHeight = m.height - 8
+		}
+		innerLines = cardHeight - 2
+		bodyHeight = m.height - 2 - cardHeight
+		bottomCard = m.renderHelpModal(m.width, innerLines)
+	} else {
+		bottomCard = m.renderBottomCueCard(m.width, innerLines)
+	}
 
 	sidebarWidth := 38
 	if m.width > 120 {
@@ -271,25 +328,89 @@ func (m CutsModel) View() string {
 		leftWidth = 30
 	}
 
-	leftView := m.renderTranscript(leftWidth)
+	leftView := m.renderTranscript(leftWidth, bodyHeight)
 	stats := model.ComputeStats(m.cues, m.media.Duration)
-	intervals := model.BuildCutIntervals(m.cues)
-	rightView := m.renderSidebar(sidebarWidth, stats, intervals)
+	intervals := m.activeCutIntervals()
+	rightView := m.renderSidebar(sidebarWidth, bodyHeight, stats, intervals)
 
 	body := lipgloss.JoinHorizontal(lipgloss.Top, leftView, rightView)
-	return lipgloss.JoinVertical(lipgloss.Left, header, body, bottomCard, footer)
+	fullView := lipgloss.JoinVertical(lipgloss.Left, header, body, bottomCard, footer)
+
+	// Ensure exact height constraint so screen never jumps
+	renderedLines := strings.Split(fullView, "\n")
+	if len(renderedLines) > m.height {
+		res := make([]string, 0, m.height)
+		res = append(res, renderedLines[:m.height-1]...)
+		res = append(res, renderedLines[len(renderedLines)-1])
+		fullView = strings.Join(res, "\n")
+	} else if len(renderedLines) < m.height {
+		pad := m.height - len(renderedLines)
+		res := make([]string, 0, m.height)
+		res = append(res, renderedLines[:len(renderedLines)-1]...)
+		for i := 0; i < pad; i++ {
+			res = append(res, strings.Repeat(" ", m.width))
+		}
+		res = append(res, renderedLines[len(renderedLines)-1])
+		fullView = strings.Join(res, "\n")
+	}
+
+	return fullView
 }
 
-// renderHeader renders the top title bar.
+// activeCutIntervals returns only intervals where Action == ActionCut.
+func (m CutsModel) activeCutIntervals() []model.CutInterval {
+	all := model.BuildCutIntervals(m.cues)
+	var cuts []model.CutInterval
+	for _, inv := range all {
+		if inv.Action == model.ActionCut {
+			cuts = append(cuts, inv)
+		}
+	}
+	return cuts
+}
+
+// computeCardHeight dynamically measures wrapped cue text to scale the bottom card.
+func (m CutsModel) computeCardHeight(width int, cue model.SubtitleCue) (cardHeight, innerLines int) {
+	innerWidth := width - 4
+	if innerWidth < 20 {
+		innerWidth = 20
+	}
+
+	speakerPrefix := ""
+	if cue.Speaker != "" {
+		speakerPrefix = cue.Speaker + ": "
+	}
+	fullText := speakerPrefix + "\"" + cue.Text + "\""
+
+	wrapped := lipgloss.NewStyle().Width(innerWidth).Render(fullText)
+	textLines := strings.Split(wrapped, "\n")
+
+	maxCard := m.height - 8
+	if maxCard < 4 {
+		maxCard = 4
+	}
+
+	desired := 1 + len(textLines) + 2
+	if desired > maxCard {
+		desired = maxCard
+	}
+	if desired < 5 {
+		desired = 5
+	}
+
+	return desired, desired - 2
+}
+
+// renderHeader renders the top title bar (exactly 1 line).
 func (m CutsModel) renderHeader() string {
 	title := m.theme.TitleStyle.Render(" talk_cut ")
 	sub := m.theme.SubtitleStyle.Render(fmt.Sprintf(" %s (%s) ", m.videoPath, vtt.FormatTimestampShort(m.media.Duration)))
 	bar := lipgloss.JoinHorizontal(lipgloss.Center, title, sub)
-	return lipgloss.NewStyle().Width(m.width).MarginBottom(1).Render(bar)
+	return lipgloss.NewStyle().Width(m.width).Render(bar)
 }
 
-// renderTranscript renders the scrolling transcript panel with exact line count.
-func (m CutsModel) renderTranscript(width int) string {
+// renderTranscript renders the scrolling transcript panel with exact body height.
+func (m *CutsModel) renderTranscript(width, bodyHeight int) string {
 	var lines []string
 	headerText := fmt.Sprintf(" TRANSCRIPT (%d cues) ", len(m.cues))
 	bar := lipgloss.NewStyle().
@@ -300,7 +421,12 @@ func (m CutsModel) renderTranscript(width int) string {
 		Render(headerText)
 	lines = append(lines, bar)
 
-	visible := m.visibleLines()
+	visible := bodyHeight - 1
+	if visible < 1 {
+		visible = 1
+	}
+	m.adjustScrollTo(visible)
+
 	for i := 0; i < visible; i++ {
 		idx := m.scrollOffset + i
 		if idx >= len(m.cues) {
@@ -313,7 +439,7 @@ func (m CutsModel) renderTranscript(width int) string {
 	return lipgloss.JoinVertical(lipgloss.Left, lines...)
 }
 
-// renderCueRow formats a single cue line with highlighting and status tags.
+// renderCueRow formats a single cue line with unicode symbols.
 func (m CutsModel) renderCueRow(idx, width int) string {
 	cue := m.cues[idx]
 	isCur := idx == m.cursor
@@ -324,21 +450,23 @@ func (m CutsModel) renderCueRow(idx, width int) string {
 	}
 
 	ts := vtt.FormatTimestampShort(cue.Start)
-	actionBadge := "[KEEP]"
+	var actionBadge string
 	if cue.Action == model.ActionCut {
-		actionBadge = "[CUT] "
+		actionBadge = m.theme.IconCut.Render("✂")
 	} else if cue.Action == model.ActionReview {
-		actionBadge = "[REV] "
+		actionBadge = m.theme.IconReview.Render("?")
+	} else {
+		actionBadge = m.theme.IconKept.Render("✔")
 	}
 
 	text := cue.Text
-	prefixLen := len(cursorTag) + len(ts) + 3 + len(actionBadge) + 1
+	prefixLen := len(cursorTag) + len(ts) + 3 + 2 + 1
 	availText := width - prefixLen - 3
 	if availText > 0 && len(text) > availText {
 		text = text[:availText-3] + "..."
 	}
 
-	raw := fmt.Sprintf("%s[%s] %s %s", cursorTag, ts, actionBadge, text)
+	raw := fmt.Sprintf("%s[%s] %s  %s", cursorTag, ts, actionBadge, text)
 	style := m.cueStyle(isCur, cue.Action)
 	return style.Width(width).Render(raw)
 }
@@ -360,14 +488,28 @@ func (m CutsModel) cueStyle(isCur bool, action model.CutAction) lipgloss.Style {
 	return m.theme.CueNormal
 }
 
-// renderSidebar renders the right-hand panel with fixed-height stats, cuts list, and keys.
-func (m CutsModel) renderSidebar(width int, stats model.CutStats, intervals []model.CutInterval) string {
+// renderSidebar renders the right-hand panel scaled to fit bodyHeight.
+func (m CutsModel) renderSidebar(width, bodyHeight int, stats model.CutStats, intervals []model.CutInterval) string {
 	statsBox := m.renderStatsBox(width, stats)
-	cutsBox := m.renderCutsBox(width, intervals)
 	helpBox := m.renderHelpBox(width)
 
-	content := lipgloss.JoinVertical(lipgloss.Left, statsBox, cutsBox, helpBox)
-	return lipgloss.NewStyle().Width(width).MarginLeft(1).Render(content)
+	statsLines := 4
+	helpLines := 5
+	availForCuts := bodyHeight - statsLines - helpLines
+	var cutsBox string
+	if availForCuts >= 3 {
+		cutsBox = m.renderCutsBox(width, intervals, availForCuts-2)
+	}
+
+	var boxes []string
+	boxes = append(boxes, statsBox)
+	if cutsBox != "" {
+		boxes = append(boxes, cutsBox)
+	}
+	boxes = append(boxes, helpBox)
+
+	content := lipgloss.JoinVertical(lipgloss.Left, boxes...)
+	return lipgloss.NewStyle().Width(width).Height(bodyHeight).MarginLeft(1).Render(content)
 }
 
 // renderStatsBox formats the duration and cut statistics.
@@ -388,18 +530,20 @@ func (m CutsModel) renderStatsBox(width int, stats model.CutStats) string {
 	return m.theme.SidebarBox.Width(width - 2).Render("STATISTICS\n" + content)
 }
 
-// renderCutsBox lists active cut intervals.
-func (m CutsModel) renderCutsBox(width int, intervals []model.CutInterval) string {
+// renderCutsBox lists active cut intervals fitted to maxItems.
+func (m CutsModel) renderCutsBox(width int, intervals []model.CutInterval, maxItems int) string {
 	var lines []string
 	lines = append(lines, fmt.Sprintf("CUT REGIONS (%d)", len(intervals)))
 
 	if len(intervals) == 0 {
 		lines = append(lines, "  (no cuts marked)")
 	} else {
-		maxShow := 3
+		if maxItems < 1 {
+			maxItems = 1
+		}
 		for i, cut := range intervals {
-			if i >= maxShow {
-				lines = append(lines, fmt.Sprintf("  ...and %d more", len(intervals)-maxShow))
+			if i >= maxItems {
+				lines = append(lines, fmt.Sprintf("  ...and %d more", len(intervals)-maxItems))
 				break
 			}
 			durSec := fmt.Sprintf("%.1fs", cut.Duration().Seconds())
@@ -417,24 +561,25 @@ func (m CutsModel) renderCutsBox(width int, intervals []model.CutInterval) strin
 
 // renderHelpBox renders keyboard shortcut hints.
 func (m CutsModel) renderHelpBox(width int) string {
-	hints := "[Space] Cut/Keep   [p] Preview\n" +
-		"[n/N]   Jump Cut   [Tab] Metadata\n" +
-		"[?]     Help       [q] Quit"
+	hints := "[Space] Cut/Keep   [s] Save\n" +
+		"[n/N]   Jump Cut   [p] Preview\n" +
+		"[Tab]   Metadata   [F1/?] Help\n" +
+		"[q]     Quit"
 	return m.theme.SidebarBox.Width(width - 2).Render(hints)
 }
 
-// renderBottomCueCard renders the active cue in a fixed-height card spanning the full width of the screen.
-func (m CutsModel) renderBottomCueCard(width int) string {
+// renderBottomCueCard renders the active cue card spanning full width.
+func (m CutsModel) renderBottomCueCard(width, innerLines int) string {
 	if len(m.cues) == 0 || m.cursor < 0 || m.cursor >= len(m.cues) {
 		return ""
 	}
 	cue := m.cues[m.cursor]
 
-	statusBadge := m.theme.BadgeKept.Render(" KEEP ")
+	statusBadge := m.theme.BadgeKept.Render(" ✔ KEEP ")
 	if cue.Action == model.ActionCut {
-		statusBadge = m.theme.BadgeCut.Render(" CUT ")
+		statusBadge = m.theme.BadgeCut.Render(" ✂ CUT ")
 	} else if cue.Action == model.ActionReview {
-		statusBadge = m.theme.BadgeReview.Render(" REVIEW ")
+		statusBadge = m.theme.BadgeReview.Render(" ? REVIEW ")
 	}
 
 	durSec := fmt.Sprintf("%.2fs", cue.Duration().Seconds())
@@ -447,34 +592,135 @@ func (m CutsModel) renderBottomCueCard(width int) string {
 		durSec,
 		statusBadge,
 	)
-	if cue.CutReason != "" {
-		line1 += "  " + m.theme.HelpDesc.Render("Reason: "+cue.CutReason)
+
+	innerWidth := width - 4
+	if innerWidth < 20 {
+		innerWidth = 20
 	}
 
-	var contentLines []string
-	contentLines = append(contentLines, line1)
+	if cue.CutReason != "" {
+		avail := innerWidth - len(durSec) - 45
+		if avail > 10 {
+			reason := cue.CutReason
+			if len(reason) > avail {
+				reason = reason[:avail-3] + "..."
+			}
+			line1 += "  " + m.theme.HelpDesc.Render("Reason: "+reason)
+		}
+	}
 
 	speakerPrefix := ""
 	if cue.Speaker != "" {
 		speakerPrefix = m.theme.SpeakerStyle.Render(cue.Speaker+": ") + " "
 	}
-	contentLines = append(contentLines, speakerPrefix+"\""+cue.Text+"\"")
+	fullText := speakerPrefix + "\"" + cue.Text + "\""
+
+	wrapped := lipgloss.NewStyle().Width(innerWidth).Render(fullText)
+	textLines := strings.Split(wrapped, "\n")
+
+	maxTextLines := innerLines - 1
+	if maxTextLines < 1 {
+		maxTextLines = 1
+	}
+	if len(textLines) > maxTextLines {
+		textLines = textLines[:maxTextLines]
+		lastIdx := maxTextLines - 1
+		if len(textLines[lastIdx]) > 3 {
+			textLines[lastIdx] = textLines[lastIdx][:len(textLines[lastIdx])-3] + "..."
+		}
+	}
+
+	contentLines := append([]string{line1}, textLines...)
+	if len(contentLines) > innerLines {
+		contentLines = contentLines[:innerLines]
+	}
 
 	cardContent := strings.Join(contentLines, "\n")
 	box := m.theme.SidebarBox.
 		Width(width - 2).
-		Height(4).
+		Height(innerLines).
 		Render(cardContent)
 
-	return lipgloss.NewStyle().Width(width).MarginTop(1).Render(box)
+	boxLines := strings.Split(box, "\n")
+	cardTotalHeight := innerLines + 2
+	if len(boxLines) > cardTotalHeight {
+		res := make([]string, 0, cardTotalHeight)
+		res = append(res, boxLines[0])
+		res = append(res, boxLines[1:cardTotalHeight-1]...)
+		res = append(res, boxLines[len(boxLines)-1])
+		box = strings.Join(res, "\n")
+	}
+	return box
 }
 
-// renderFooter renders the bottom status bar.
+// renderHelpModal renders keyboard shortcuts cheat sheet.
+func (m CutsModel) renderHelpModal(width, innerLines int) string {
+	title := m.theme.TitleStyle.Render(" KEYBOARD SHORTCUTS ") + "  " + m.theme.HelpDesc.Render("(Press F1, ?, or Esc to close)")
+	rows := []string{
+		title,
+		"  j / k       Navigate cues              Space / x   Toggle Cut / Keep (auto-saves)",
+		"  g / G       Jump top / bottom          s / Ctrl+S  Save cut decisions to talk_cuts.json",
+		"  pgdn / pgup Page down / up             p           Preview cue at timestamp (ffplay)",
+		"  n / N       Jump next / prev cut       Tab / Enter Metadata & YouTube chapters",
+		"  F1 / ?      Toggle help                q / Ctrl+C  Quit",
+	}
+	if len(rows) > innerLines {
+		rows = rows[:innerLines]
+	}
+	for len(rows) < innerLines {
+		rows = append(rows, "")
+	}
+	return m.theme.SidebarBox.
+		Width(width - 2).
+		Height(innerLines).
+		Render(strings.Join(rows, "\n"))
+}
+
+// renderFooter renders the bottom status bar (strictly 1 single line) with live cue counter.
 func (m CutsModel) renderFooter() string {
+	var cueBadge string
+	if len(m.cues) > 0 && m.cursor >= 0 && m.cursor < len(m.cues) {
+		cue := m.cues[m.cursor]
+		durSec := fmt.Sprintf("%.2fs", cue.Duration().Seconds())
+		cueBadge = fmt.Sprintf(" Cue %d/%d [%s] (%s) ",
+			m.cursor+1, len(m.cues),
+			vtt.FormatTimestampShort(cue.Start),
+			durSec,
+		)
+	}
+
+	left := m.theme.TitleStyle.Render(cueBadge)
+	leftWidth := lipgloss.Width(left)
+
+	availRight := m.width - leftWidth - 1
+	if availRight < 0 {
+		availRight = 0
+	}
+
 	msg := m.statusMsg
 	if msg == "" {
-		msg = "Ready"
+		if availRight >= 68 {
+			msg = "j/k: nav | Space: cut/keep | s: save | p: preview | Tab: meta | F1: help | q: quit"
+		} else if availRight >= 45 {
+			msg = "j/k: nav | Space: cut/keep | s: save | Tab: meta | F1: help"
+		} else if availRight >= 25 {
+			msg = "j/k: nav | Space: cut | s: save"
+		} else {
+			msg = ""
+		}
 	}
-	bar := m.theme.HelpDesc.Render(" " + msg)
-	return lipgloss.NewStyle().Width(m.width).Render(bar)
+
+	if len(msg) > availRight && availRight > 3 {
+		msg = msg[:availRight-3] + "..."
+	} else if len(msg) > availRight {
+		msg = ""
+	}
+
+	right := m.theme.HelpDesc.Render(" " + msg)
+	bar := lipgloss.JoinHorizontal(lipgloss.Center, left, right)
+	lines := strings.Split(bar, "\n")
+	if len(lines) > 1 {
+		bar = lines[0]
+	}
+	return lipgloss.NewStyle().Width(m.width).MaxHeight(1).Render(bar)
 }

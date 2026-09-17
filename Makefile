@@ -1,6 +1,6 @@
 # talk_cut - Talk video cutting & YouTube publishing pipeline
 
-.PHONY: all build check ci lint audit review static-analysis test commit wip bump bump-minor bump-major clean install
+.PHONY: all build check ci lint audit review static-analysis test test-tui test-scroll commit wip bump bump-minor bump-major clean install
 
 BIN_NAME := talk_cut
 GO_FILES := $(shell find . -name "*.go" -not -path "./vendor/*")
@@ -44,6 +44,10 @@ test:
 # Live interactive TUI snapshot tests (headless tmux)
 test-tui: build
 	ruby tools/live_tui_test.rb
+
+# Live full transcript scroll test (verifies top & bottom invariants across 540 cues)
+test-scroll: build
+	ruby tools/live_tui_test.rb --scroll-only
 
 # Docker-based Charm VHS snapshot testing
 test-vhs: build

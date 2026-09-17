@@ -12,6 +12,7 @@ type KeyMap struct {
 	Home     key.Binding
 	End      key.Binding
 	Toggle   key.Binding
+	Save     key.Binding
 	Preview  key.Binding
 	NextCut  key.Binding
 	PrevCut  key.Binding
@@ -53,6 +54,10 @@ func DefaultKeyMap() KeyMap {
 			key.WithKeys(" ", "x"),
 			key.WithHelp("space", "toggle cut"),
 		),
+		Save: key.NewBinding(
+			key.WithKeys("s", "ctrl+s"),
+			key.WithHelp("s", "save cuts"),
+		),
 		Preview: key.NewBinding(
 			key.WithKeys("p"),
 			key.WithHelp("p", "ffplay preview"),
@@ -78,8 +83,8 @@ func DefaultKeyMap() KeyMap {
 			key.WithHelp("c", "commit & cut video"),
 		),
 		Help: key.NewBinding(
-			key.WithKeys("?"),
-			key.WithHelp("?", "toggle help"),
+			key.WithKeys("f1", "?"),
+			key.WithHelp("F1/?", "toggle help"),
 		),
 		Quit: key.NewBinding(
 			key.WithKeys("q", "ctrl+c"),
