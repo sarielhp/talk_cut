@@ -24,9 +24,9 @@ type Client struct {
 
 // NewClient initializes an AI client from user configuration.
 func NewClient(cfg config.Config) (*Client, error) {
-	key := strings.TrimSpace(cfg.OpenRouterKey)
-	if key == "" {
-		return nil, fmt.Errorf("no OpenRouter API key found (set OPENROUTER_API_KEY or configure ~/.config/talk_cut/config.json)")
+	key, err := cfg.GetAPIKey()
+	if err != nil {
+		return nil, fmt.Errorf("resolving API key: %w", err)
 	}
 
 	baseURL := strings.TrimRight(cfg.BaseURL, "/")

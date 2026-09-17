@@ -9,9 +9,9 @@ import (
 	"strings"
 )
 
-// Config stores runtime configuration parameters.
+// Config stores runtime configuration parameters without embedding raw secret tokens.
 type Config struct {
-	OpenRouterKey   string `json:"openrouter_key"`
+	KeyFile         string `json:"key_file"`
 	Model           string `json:"model"`
 	BaseURL         string `json:"base_url"`
 	YouTubeSecrets  string `json:"youtube_secrets"`
@@ -22,16 +22,16 @@ type Config struct {
 // DefaultConfig returns baseline configuration settings.
 func DefaultConfig() Config {
 	return Config{
+		KeyFile:         "~/.config/auth/openrouter_api_key",
 		Model:           "google/gemini-2.5-flash-lite",
 		BaseURL:         "https://openrouter.ai/api/v1",
 		DefaultPrivacy:  "unlisted",
 		PreferredLayout: "slides",
+		YouTubeSecrets:  "~/.config/talk_cut/client_secrets.json",
 	}
 }
 
-// LoadConfig resolves configuration using prioritized resolution:
-// 1. ~/.config/talk_cut/config.json
-// 2. Environment variables (OPENROUTER_API_KEY, TALK_CUT_MODEL)
+// LoadConfig resolves configuration from ~/.config/talk_cut/config.json with environment overrides.
 func LoadConfig() (Config, error) {
 	cfg := DefaultConfig()
 
@@ -40,9 +40,9 @@ func LoadConfig() (Config, error) {
 		loadFromTalkCutConfig(&cfg, home)
 	}
 
-	// Environment variables override file configuration
-	if envKey := os.Getenv("OPENROUTER_API_KEY"); envKey != "" {
-		cfg.OpenRouterKey = strings.TrimSpace(envKey)
+	// Environment overrides
+	if envKeyFile := os.Getenv("TALK_CUT_KEY_FILE"); envKeyFile != "" {
+		cfg.KeyFile = strings.TrimSpace(envKeyFile)
 	}
 	if envModel := os.Getenv("TALK_CUT_MODEL"); envModel != "" {
 		cfg.Model = strings.TrimSpace(envModel)
@@ -61,8 +61,8 @@ func loadFromTalkCutConfig(cfg *Config, home string) {
 
 	var stored Config
 	if err := json.Unmarshal(data, &stored); err == nil {
-		if stored.OpenRouterKey != "" {
-			cfg.OpenRouterKey = stored.OpenRouterKey
+		if stored.KeyFile != "" {
+			cfg.KeyFile = stored.KeyFile
 		}
 		if stored.Model != "" {
 			cfg.Model = stored.Model
@@ -80,6 +80,63 @@ func loadFromTalkCutConfig(cfg *Config, home string) {
 			cfg.PreferredLayout = stored.PreferredLayout
 		}
 	}
+}
+
+// GetAPIKey resolves and reads the API key.
+// Priority:
+// 1. OPENROUTER_API_KEY environment variable (if explicitly set)
+// 2. The key file specified in c.KeyFile (e.g. ~/.config/auth/openrouter_api_key)
+func (c Config) GetAPIKey() (string, error) {
+	if envKey := os.Getenv("OPENROUTER_API_KEY"); strings.TrimSpace(envKey) != "" {
+		return strings.TrimSpace(envKey), nil
+	}
+
+	resolvedPath, err := ResolvePath(c.KeyFile)
+	if err != nil {
+		return "", fmt.Errorf("resolving key file path %q: %w", c.KeyFile, err)
+	}
+
+	data, err := os.ReadFile(resolvedPath)
+	if err != nil {
+		return "", fmt.Errorf("reading API key from %q: %w", resolvedPath, err)
+	}
+
+	key := strings.TrimSpace(string(data))
+	if key == "" {
+		return "", fmt.Errorf("API key file %q is empty", resolvedPath)
+	}
+
+	return key, nil
+}
+
+// ResolvePath expands ~ to user's home directory and resolves bare filenames into ~/.config/auth/.
+func ResolvePath(p string) (string, error) {
+	p = strings.TrimSpace(p)
+	if p == "" {
+		return "", fmt.Errorf("empty path")
+	}
+
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return "", fmt.Errorf("locating home directory: %w", err)
+	}
+
+	if p == "~" {
+		return home, nil
+	}
+	if strings.HasPrefix(p, "~/") {
+		return filepath.Join(home, p[2:]), nil
+	}
+
+	// If given a bare filename like "openrouter_api_key", check ~/.config/auth/ first
+	if !strings.Contains(p, string(filepath.Separator)) {
+		authCandidate := filepath.Join(home, ".config", "auth", p)
+		if _, statErr := os.Stat(authCandidate); statErr == nil {
+			return authCandidate, nil
+		}
+	}
+
+	return filepath.Clean(p), nil
 }
 
 // SaveConfig persists the current configuration to ~/.config/talk_cut/config.json.
@@ -100,7 +157,7 @@ func (c Config) SaveConfig() error {
 		return fmt.Errorf("marshaling config: %w", marshalErr)
 	}
 
-	if writeErr := os.WriteFile(path, data, 0o600); writeErr != nil {
+	if writeErr := os.WriteFile(path, data, 0o644); writeErr != nil {
 		return fmt.Errorf("writing config file: %w", writeErr)
 	}
 

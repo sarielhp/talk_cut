@@ -46,12 +46,12 @@ existing_conf = {}
 existing_conf = JSON.parse(File.read(target_conf)) if File.exist?(target_conf)
 
 config_to_save = {
-  'openrouter_key' => api_key || existing_conf['openrouter_key'] || '',
+  'key_file' => existing_conf['key_file'] || '~/.config/auth/openrouter_api_key',
   'model' => model || existing_conf['model'] || 'google/gemini-2.5-flash-lite',
   'base_url' => existing_conf['base_url'] || 'https://openrouter.ai/api/v1',
   'default_privacy' => existing_conf['default_privacy'] || 'unlisted',
   'preferred_layout' => existing_conf['preferred_layout'] || 'slides',
-  'youtube_secrets' => existing_conf['youtube_secrets'] || File.join(target_dir, 'client_secrets.json')
+  'youtube_secrets' => existing_conf['youtube_secrets'] || '~/.config/talk_cut/client_secrets.json'
 }
 
 File.write(target_conf, "#{JSON.pretty_generate(config_to_save)}\n")
@@ -59,5 +59,5 @@ File.chmod(0o600, target_conf)
 
 puts "\e[32m✔ Successfully synced OpenRouter config from profile '#{profile}' to #{target_conf}\e[0m"
 puts "  Model: #{config_to_save['model']}"
-puts "  API Key: #{config_to_save['openrouter_key'].empty? ? '(none)' : '***' + config_to_save['openrouter_key'][-6..]}"
+puts "  Key File: #{config_to_save['key_file']}"
 exit 0

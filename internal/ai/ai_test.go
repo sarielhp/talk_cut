@@ -53,10 +53,10 @@ func TestDetectCutsMock(t *testing.T) {
 	}))
 	defer server.Close()
 
+	t.Setenv("OPENROUTER_API_KEY", "mock-key")
 	cfg := config.Config{
-		OpenRouterKey: "mock-key",
-		BaseURL:       server.URL,
-		Model:         "mock-model",
+		BaseURL: server.URL,
+		Model:   "mock-model",
 	}
 
 	client, err := NewClient(cfg)
@@ -115,10 +115,10 @@ func TestExtractTalkMetadataMock(t *testing.T) {
 	}))
 	defer server.Close()
 
+	t.Setenv("OPENROUTER_API_KEY", "mock-key")
 	cfg := config.Config{
-		OpenRouterKey: "mock-key",
-		BaseURL:       server.URL,
-		Model:         "mock-model",
+		BaseURL: server.URL,
+		Model:   "mock-model",
 	}
 
 	client, err := NewClient(cfg)
