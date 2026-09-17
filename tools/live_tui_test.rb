@@ -122,7 +122,7 @@ class TUISnapshotTester
     # Step 7: Switch to Metadata & Chapters view (Tab)
     log_step("Switch to Metadata & Chapters view with [Tab]")
     send_key("Tab")
-    snap = wait_for_pattern("METADATA & CHAPTERS", "Metadata view active")
+    snap = wait_for_pattern("TALK & EXPORT CONFIGURATION", "Metadata view active")
     capture_snapshot("06_metadata_view", snap)
     assert_contains(snap, "TALK & EXPORT CONFIGURATION", "Metadata input card header")
     assert_contains(snap, "YOUTUBE CHAPTERS PREVIEW", "YouTube chapters preview pane")

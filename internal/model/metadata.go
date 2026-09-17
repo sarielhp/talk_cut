@@ -64,7 +64,7 @@ func (m TalkMetadata) BuildYouTubeDescription() string {
 		sb.WriteString("\n\n")
 	}
 
-	if m.URL != "" {
+	if m.URL != "" && !strings.Contains(m.Abstract, m.URL) {
 		sb.WriteString("Talk announcement: ")
 		sb.WriteString(m.URL)
 		sb.WriteString("\n\n")

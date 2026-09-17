@@ -154,12 +154,15 @@ func (a AppModel) handleCutsKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 func (a AppModel) handleMetaKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch msg.String() {
 	case "esc":
+		_ = model.SaveMetaFile(a.bundle.Dir, a.metaView.Metadata())
 		a.screen = ScreenCuts
 		return a, nil
 	case "ctrl+r":
+		_ = model.SaveMetaFile(a.bundle.Dir, a.metaView.Metadata())
 		return a.startRender()
 	case "enter":
 		if a.metaView.focusIndex == fieldCommit {
+			_ = model.SaveMetaFile(a.bundle.Dir, a.metaView.Metadata())
 			return a.startRender()
 		}
 	}

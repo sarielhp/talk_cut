@@ -37,6 +37,7 @@ type cliOptions struct {
 	layout      string
 	noAI        bool
 	dryRun      bool
+	metaOnly    bool
 	upload      bool
 	reDetect    bool
 	channel     string
@@ -70,6 +71,15 @@ func run(args []string) error {
 	if opts.showHelp || opts.dir == "" {
 		printHelp()
 		return nil
+	}
+
+	if opts.metaOnly {
+		ctx := context.Background()
+		cfg, cfgErr := config.LoadConfig()
+		if cfgErr != nil {
+			return fmt.Errorf("loading config: %w", cfgErr)
+		}
+		return runMetaOnly(ctx, opts, cfg)
 	}
 
 	return executePipeline(opts)
@@ -117,10 +127,21 @@ func runAuth(args []string) error {
 	return nil
 }
 
+// isURL checks if a string begins with http:// or https://.
+func isURL(s string) bool {
+	lower := strings.ToLower(s)
+	return strings.HasPrefix(lower, "http://") || strings.HasPrefix(lower, "https://")
+}
+
 // parseCLIFlags parses command-line arguments into cliOptions.
 func parseCLIFlags(args []string) (*cliOptions, error) {
 	fs := flag.NewFlagSet("talk_cut", flag.ContinueOnError)
 	opts := &cliOptions{}
+
+	isTalkCal := len(os.Args) > 0 && (strings.HasSuffix(os.Args[0], "talk_cal") || strings.HasSuffix(os.Args[0], "talk_cal.exe"))
+	if isTalkCal {
+		opts.metaOnly = true
+	}
 
 	fs.StringVar(&opts.output, "o", "", "Output cut video path")
 	fs.StringVar(&opts.output, "output", "", "Output cut video path")
@@ -129,6 +150,7 @@ func parseCLIFlags(args []string) (*cliOptions, error) {
 	fs.StringVar(&opts.layout, "layout", "", "Preferred video layout (slides, clean, speaker, gallery)")
 	fs.BoolVar(&opts.noAI, "no-ai", false, "Disable OpenRouter AI cut detection")
 	fs.BoolVar(&opts.dryRun, "dry-run", false, "Analyze and print cut plan without opening TUI")
+	fs.BoolVar(&opts.metaOnly, "meta-only", opts.metaOnly, "Fetch talk metadata from URL, save talk_meta.json, and exit")
 	fs.BoolVar(&opts.upload, "upload", false, "Upload cut video to YouTube upon completion")
 	fs.BoolVar(&opts.reDetect, "re-detect", false, "Force re-running AI cut detection even if talk_cuts.json exists")
 	fs.StringVar(&opts.channel, "channel", "", "Target YouTube channel profile name")
@@ -143,8 +165,15 @@ func parseCLIFlags(args []string) (*cliOptions, error) {
 		return nil, err
 	}
 
-	if fs.NArg() > 0 {
-		opts.dir = fs.Arg(0)
+	for i := 0; i < fs.NArg(); i++ {
+		arg := fs.Arg(i)
+		if isURL(arg) && opts.url == "" {
+			opts.url = arg
+		} else if opts.dir == "" {
+			opts.dir = arg
+		} else if opts.output == "" && !isURL(arg) {
+			opts.output = arg
+		}
 	}
 	return opts, nil
 }
@@ -181,7 +210,7 @@ func executePipeline(opts *cliOptions) error {
 			fmt.Printf("Loaded %d saved cut intervals from %s\n", len(savedCuts), cutsPath)
 		}
 	} else if !opts.noAI {
-		cues = runAICutDetection(ctx, cfg, cues, &talkMeta)
+		cues = runAICutDetection(ctx, opts.dir, cfg, cues, &talkMeta)
 		_ = model.SaveCutsFile(opts.dir, model.BuildCutIntervals(cues))
 	}
 
@@ -213,6 +242,33 @@ func applyConfigOverrides(cfg *config.Config, opts *cliOptions) {
 	}
 }
 
+// runMetaOnly fetches metadata from URL and saves talk_meta.json without launching TUI.
+func runMetaOnly(ctx context.Context, opts *cliOptions, cfg config.Config) error {
+	info, err := os.Stat(opts.dir)
+	if err != nil || !info.IsDir() {
+		return fmt.Errorf("%q is not a valid directory", opts.dir)
+	}
+	if opts.url == "" && !model.HasSavedMetadata(opts.dir) {
+		return fmt.Errorf("no URL provided to update metadata (usage: talk_cal <dir> <url>)")
+	}
+	meta := initialMetadata(ctx, opts, cfg)
+	fmt.Printf("✔ Talk metadata in %s is updated\n", opts.dir)
+	if meta.Title != "" {
+		fmt.Printf("  Title:    %s\n", meta.Title)
+	}
+	if meta.Speaker != "" {
+		fmt.Printf("  Speaker:  %s", meta.Speaker)
+		if meta.Affiliation != "" {
+			fmt.Printf(" (%s)", meta.Affiliation)
+		}
+		fmt.Println()
+	}
+	if meta.URL != "" {
+		fmt.Printf("  URL:      %s\n", meta.URL)
+	}
+	return nil
+}
+
 // initialMetadata constructs baseline metadata, optionally scraping the seminar web page.
 func initialMetadata(ctx context.Context, opts *cliOptions, cfg config.Config) model.TalkMetadata {
 	meta := model.TalkMetadata{
@@ -220,22 +276,62 @@ func initialMetadata(ctx context.Context, opts *cliOptions, cfg config.Config) m
 		Privacy: cfg.DefaultPrivacy,
 	}
 
+	if model.HasSavedMetadata(opts.dir) {
+		if saved, err := model.LoadMetaFile(opts.dir); err == nil {
+			meta = saved
+			metaPath := filepath.Join(opts.dir, model.MetaFileName)
+			fmt.Printf("Loaded saved talk metadata from %s\n", metaPath)
+		}
+	}
+
 	if opts.url != "" {
 		meta.URL = opts.url
-		if page, err := metadata.FetchTalkPage(ctx, opts.url); err == nil {
-			if page.Title != "" {
-				meta.Title = page.Title
+		info, err := metadata.FetchTalkInfo(ctx, opts.url)
+		if err == nil {
+			applyTalkInfoToMetadata(&meta, info)
+			fmt.Printf("✔ Fetched talk metadata from %s\n", opts.url)
+			if meta.Speaker != "" {
+				fmt.Printf("  Speaker: %s", meta.Speaker)
+				if meta.Affiliation != "" {
+					fmt.Printf(" (%s)", meta.Affiliation)
+				}
+				fmt.Println()
 			}
-			if page.Description != "" {
-				meta.Abstract = page.Description
+			if meta.Title != "" {
+				fmt.Printf("  Title:   %s\n", meta.Title)
 			}
+		} else {
+			fmt.Fprintf(os.Stderr, "warning: fetching %s: %v\n", opts.url, err)
+		}
+		if saveErr := model.SaveMetaFile(opts.dir, meta); saveErr == nil {
+			metaPath := filepath.Join(opts.dir, model.MetaFileName)
+			fmt.Printf("  Saved talk metadata to %s\n", metaPath)
 		}
 	}
 	return meta
 }
 
+// applyTalkInfoToMetadata applies extracted web info onto TalkMetadata.
+func applyTalkInfoToMetadata(meta *model.TalkMetadata, info metadata.TalkPageInfo) {
+	if info.Title != "" {
+		meta.Title = info.Title
+	}
+	if info.Speaker != "" {
+		meta.Speaker = info.Speaker
+	}
+	if info.Affiliation != "" {
+		meta.Affiliation = info.Affiliation
+	}
+	if info.Abstract != "" {
+		meta.Abstract = info.Abstract
+	}
+	if len(info.Tags) > 0 {
+		meta.Tags = info.Tags
+	}
+}
+
 // runAICutDetection queries OpenRouter to detect candidate cuts and enrich metadata.
-func runAICutDetection(ctx context.Context, cfg config.Config, cues []model.SubtitleCue, meta *model.TalkMetadata) []model.SubtitleCue {
+func runAICutDetection(ctx context.Context, dir string, cfg config.Config, cues []model.SubtitleCue, meta *model.TalkMetadata) []model.SubtitleCue {
 	client, err := ai.NewClient(cfg)
 	if err != nil {
 		return cues
@@ -260,12 +356,13 @@ func runAICutDetection(ctx context.Context, cfg config.Config, cues []model.Subt
 			if aiMeta.Abstract != "" && meta.Abstract == "" {
 				meta.Abstract = aiMeta.Abstract
 			}
-			if len(aiMeta.Tags) > 0 {
+			if len(aiMeta.Tags) > 0 && len(meta.Tags) == 0 {
 				meta.Tags = aiMeta.Tags
 			}
 			if len(aiMeta.Chapters) > 0 {
 				meta.Chapters = aiMeta.Chapters
 			}
+			_ = model.SaveMetaFile(dir, *meta)
 		}
 	}
 
@@ -325,11 +422,13 @@ func printDryRunReport(b *bundle.RecordingBundle, media cutter.MediaInfo, cues [
 func printHelp() {
 	fmt.Printf("talk_cut v%s - Interactive Talk Trimmer & YouTube Publisher\n\n", Version)
 	fmt.Println("Usage:")
-	fmt.Println("  talk_cut [options] <recording-directory>")
+	fmt.Println("  talk_cut [options] <recording-directory> [announcement-url]")
+	fmt.Println("  talk_cal <recording-directory> <announcement-url>")
 	fmt.Println("  talk_cut auth [options] [client_secrets.json]")
 	fmt.Println("\nOptions:")
 	fmt.Println("  -o, --output <path>    Custom output destination for sliced video")
 	fmt.Println("  -u, --url <url>        Seminar announcement URL (extracts speaker, title, abstract)")
+	fmt.Println("  --meta-only            Fetch talk metadata from URL, save talk_meta.json, and exit")
 	fmt.Println("  --layout <type>        Preferred layout: slides (default), clean, speaker, gallery")
 	fmt.Println("  --no-ai                Skip AI LLM cut detection")
 	fmt.Println("  --re-detect            Force re-running AI cut detection even if talk_cuts.json exists")
