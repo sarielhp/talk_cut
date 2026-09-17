@@ -4,6 +4,7 @@ package main
 import (
 	"context"
 	_ "embed"
+	"errors"
 	"flag"
 	"fmt"
 	"os"
@@ -20,6 +21,7 @@ import (
 	"talk_cut/internal/model"
 	"talk_cut/internal/ui"
 	"talk_cut/internal/vtt"
+	"talk_cut/internal/youtube"
 )
 
 //go:embed VERSION
@@ -35,6 +37,7 @@ type cliOptions struct {
 	layout      string
 	noAI        bool
 	dryRun      bool
+	upload      bool
 	keyFile     string
 	model       string
 	showVersion bool
@@ -49,6 +52,10 @@ func main() {
 }
 
 func run(args []string) error {
+	if len(args) > 0 && args[0] == "auth" {
+		return runAuth(args[1:])
+	}
+
 	opts, err := parseCLIFlags(args)
 	if err != nil {
 		return err
@@ -66,6 +73,40 @@ func run(args []string) error {
 	return executePipeline(opts)
 }
 
+// runAuth executes the interactive YouTube OAuth authorization flow.
+func runAuth(args []string) error {
+	fs := flag.NewFlagSet("talk_cut auth", flag.ContinueOnError)
+	var secretsPath, tokenPath string
+	fs.StringVar(&secretsPath, "secrets", "", "Path to Google Cloud client secrets JSON")
+	fs.StringVar(&tokenPath, "token", "", "Path to store OAuth token (default: ~/.config/auth/youtube_token.json)")
+
+	if err := fs.Parse(args); err != nil {
+		if errors.Is(err, flag.ErrHelp) {
+			return nil
+		}
+		return err
+	}
+
+	if fs.NArg() > 0 && secretsPath == "" {
+		secretsPath = fs.Arg(0)
+	}
+
+	cfg, err := config.LoadConfig()
+	if err != nil {
+		return fmt.Errorf("loading config: %w", err)
+	}
+
+	ctx := context.Background()
+	if err := youtube.Authorize(ctx, cfg, secretsPath, tokenPath); err != nil {
+		return fmt.Errorf("authorization failed: %w", err)
+	}
+
+	fmt.Println("\n✔ Successfully authorized with YouTube!")
+	fmt.Printf("Token saved: %s\n", cfg.YouTubeTokenFile)
+	fmt.Println("Config updated: ~/.config/talk_cut/config.json")
+	return nil
+}
+
 // parseCLIFlags parses command-line arguments into cliOptions.
 func parseCLIFlags(args []string) (*cliOptions, error) {
 	fs := flag.NewFlagSet("talk_cut", flag.ContinueOnError)
@@ -78,6 +119,7 @@ func parseCLIFlags(args []string) (*cliOptions, error) {
 	fs.StringVar(&opts.layout, "layout", "", "Preferred video layout (slides, clean, speaker, gallery)")
 	fs.BoolVar(&opts.noAI, "no-ai", false, "Disable OpenRouter AI cut detection")
 	fs.BoolVar(&opts.dryRun, "dry-run", false, "Analyze and print cut plan without opening TUI")
+	fs.BoolVar(&opts.upload, "upload", false, "Upload cut video to YouTube upon completion")
 	fs.StringVar(&opts.keyFile, "key-file", "", "Custom path to auth key file")
 	fs.StringVar(&opts.model, "model", "", "OpenRouter model name")
 	fs.BoolVar(&opts.showVersion, "v", false, "Print version and exit")
@@ -265,12 +307,14 @@ func printHelp() {
 	fmt.Printf("talk_cut v%s - Interactive Talk Trimmer & YouTube Publisher\n\n", Version)
 	fmt.Println("Usage:")
 	fmt.Println("  talk_cut [options] <recording-directory>")
+	fmt.Println("  talk_cut auth [options] [client_secrets.json]")
 	fmt.Println("\nOptions:")
 	fmt.Println("  -o, --output <path>    Custom output destination for sliced video")
 	fmt.Println("  -u, --url <url>        Seminar announcement URL (extracts speaker, title, abstract)")
 	fmt.Println("  --layout <type>        Preferred layout: slides (default), clean, speaker, gallery")
 	fmt.Println("  --no-ai                Skip AI LLM cut detection")
 	fmt.Println("  --dry-run              Analyze and print cut plan without opening TUI")
+	fmt.Println("  --upload               Upload cut video to YouTube upon completion")
 	fmt.Println("  --key-file <path>      Path to OpenRouter API key file (default: ~/.config/auth/openrouter_api_key)")
 	fmt.Println("  --model <name>         OpenRouter model name (default: google/gemini-2.5-flash-lite)")
 	fmt.Println("  -v, --version          Print version information")

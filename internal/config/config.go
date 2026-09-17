@@ -11,23 +11,25 @@ import (
 
 // Config stores runtime configuration parameters without embedding raw secret tokens.
 type Config struct {
-	KeyFile         string `json:"key_file"`
-	Model           string `json:"model"`
-	BaseURL         string `json:"base_url"`
-	YouTubeSecrets  string `json:"youtube_secrets"`
-	DefaultPrivacy  string `json:"default_privacy"`
-	PreferredLayout string `json:"preferred_layout"` // "slides", "clean", "speaker", "gallery"
+	KeyFile          string `json:"key_file"`
+	Model            string `json:"model"`
+	BaseURL          string `json:"base_url"`
+	YouTubeSecrets   string `json:"youtube_secrets"`
+	YouTubeTokenFile string `json:"youtube_token_file,omitempty"`
+	DefaultPrivacy   string `json:"default_privacy"`
+	PreferredLayout  string `json:"preferred_layout"` // "slides", "clean", "speaker", "gallery"
 }
 
 // DefaultConfig returns baseline configuration settings.
 func DefaultConfig() Config {
 	return Config{
-		KeyFile:         "~/.config/auth/openrouter_api_key",
-		Model:           "google/gemini-2.5-flash-lite",
-		BaseURL:         "https://openrouter.ai/api/v1",
-		DefaultPrivacy:  "unlisted",
-		PreferredLayout: "slides",
-		YouTubeSecrets:  "~/.config/talk_cut/client_secrets.json",
+		KeyFile:          "~/.config/auth/openrouter_api_key",
+		Model:            "google/gemini-2.5-flash-lite",
+		BaseURL:          "https://openrouter.ai/api/v1",
+		DefaultPrivacy:   "unlisted",
+		PreferredLayout:  "slides",
+		YouTubeSecrets:   "~/.config/auth/youtube_client_secrets.json",
+		YouTubeTokenFile: "~/.config/auth/youtube_token.json",
 	}
 }
 
@@ -46,6 +48,12 @@ func LoadConfig() (Config, error) {
 	}
 	if envModel := os.Getenv("TALK_CUT_MODEL"); envModel != "" {
 		cfg.Model = strings.TrimSpace(envModel)
+	}
+	if envSec := os.Getenv("TALK_CUT_YOUTUBE_SECRETS"); envSec != "" {
+		cfg.YouTubeSecrets = strings.TrimSpace(envSec)
+	}
+	if envTok := os.Getenv("TALK_CUT_YOUTUBE_TOKEN"); envTok != "" {
+		cfg.YouTubeTokenFile = strings.TrimSpace(envTok)
 	}
 
 	return cfg, nil
@@ -72,6 +80,9 @@ func loadFromTalkCutConfig(cfg *Config, home string) {
 		}
 		if stored.YouTubeSecrets != "" {
 			cfg.YouTubeSecrets = stored.YouTubeSecrets
+		}
+		if stored.YouTubeTokenFile != "" {
+			cfg.YouTubeTokenFile = stored.YouTubeTokenFile
 		}
 		if stored.DefaultPrivacy != "" {
 			cfg.DefaultPrivacy = stored.DefaultPrivacy
