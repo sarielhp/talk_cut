@@ -211,7 +211,7 @@ func (m ProgModel) renderBody() string {
 		if m.vttPath != "" {
 			lines = append(lines, fmt.Sprintf("Subtitles: %s", m.vttPath))
 		}
-		lines = append(lines, "", "[p] Preview Cut Video in ffplay    [q] Exit talk_cut")
+		lines = append(lines, "", "[p] Preview Video    [u] Upload to YouTube (Tab 5)    [q] Exit talk_cut")
 
 		content := strings.Join(lines, "\n")
 		box := m.theme.SidebarBox.Width(m.width - 4).Render(content)
@@ -278,6 +278,8 @@ func (m ProgModel) renderFooter() string {
 	msg := m.statusMsg
 	if !m.isCutting && !m.done && m.err == nil {
 		msg = "Enter / c: start rendering | ←/→: switch tabs | Esc: cuts review"
+	} else if m.done && m.err == nil {
+		msg = "p: preview video | u: upload to YouTube (Tab 5) | ←/→: switch tabs | q: exit"
 	}
 	bar := m.theme.HelpDesc.Render(" " + msg)
 	return lipgloss.NewStyle().Width(m.width).MarginTop(1).Render(bar)

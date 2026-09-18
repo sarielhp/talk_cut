@@ -15,9 +15,21 @@ import (
 )
 
 var (
-	videosEndpoint   = "https://www.googleapis.com/upload/youtube/v3/videos?uploadType=resumable&part=snippet,status"
-	captionsEndpoint = "https://www.googleapis.com/upload/youtube/v3/captions?uploadType=multipart&part=snippet"
+	videosEndpoint      = "https://www.googleapis.com/upload/youtube/v3/videos?uploadType=resumable&part=snippet,status"
+	captionsEndpoint    = "https://www.googleapis.com/upload/youtube/v3/captions?uploadType=multipart&part=snippet"
+	videoStatusEndpoint = "https://www.googleapis.com/youtube/v3/videos?part=snippet,status,processingDetails"
 )
+
+// VideoVerification contains the publication, processing status, and short link for a YouTube video.
+type VideoVerification struct {
+	VideoID          string `json:"id"`
+	Title            string `json:"title"`
+	UploadStatus     string `json:"upload_status"`     // "uploaded", "processed", "rejected", "failed"
+	PrivacyStatus    string `json:"privacy_status"`    // "public", "unlisted", "private"
+	ProcessingStatus string `json:"processing_status"` // "processing", "succeeded", "failed", "terminated"
+	ShortURL         string `json:"short_url"`         // "https://youtu.be/<id>"
+	WatchURL         string `json:"watch_url"`         // "https://www.youtube.com/watch?v=<id>"
+}
 
 // UploadOptions specifies video and metadata parameters for YouTube upload.
 type UploadOptions struct {
@@ -238,4 +250,76 @@ func performMultipartCaptionUpload(ctx context.Context, client *http.Client, met
 	}
 
 	return nil
+}
+
+// VerifyVideo queries YouTube Data API to confirm video registration and processing status.
+func VerifyVideo(ctx context.Context, client *http.Client, videoID string) (*VideoVerification, error) {
+	if videoID == "" {
+		return nil, fmt.Errorf("video ID cannot be empty")
+	}
+
+	reqURL := fmt.Sprintf("%s&id=%s", videoStatusEndpoint, videoID)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, reqURL, nil)
+	if err != nil {
+		return nil, fmt.Errorf("creating verification request: %w", err)
+	}
+
+	resp, err := client.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("querying video status: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		return nil, fmt.Errorf("verification request rejected (status %d): %s", resp.StatusCode, string(body))
+	}
+
+	var data struct {
+		Items []struct {
+			ID      string `json:"id"`
+			Snippet struct {
+				Title string `json:"title"`
+			} `json:"snippet"`
+			Status struct {
+				UploadStatus  string `json:"uploadStatus"`
+				PrivacyStatus string `json:"privacyStatus"`
+			} `json:"status"`
+			ProcessingDetails struct {
+				ProcessingStatus string `json:"processingStatus"`
+			} `json:"processingDetails"`
+		} `json:"items"`
+	}
+
+	if err := json.NewDecoder(resp.Body).Decode(&data); err != nil {
+		return nil, fmt.Errorf("parsing verification response: %w", err)
+	}
+
+	shortURL := fmt.Sprintf("https://youtu.be/%s", videoID)
+	watchURL := fmt.Sprintf("https://www.youtube.com/watch?v=%s", videoID)
+
+	if len(data.Items) == 0 {
+		return &VideoVerification{
+			VideoID:      videoID,
+			UploadStatus: "uploaded",
+			ShortURL:     shortURL,
+			WatchURL:     watchURL,
+		}, nil
+	}
+
+	item := data.Items[0]
+	procStatus := item.ProcessingDetails.ProcessingStatus
+	if procStatus == "" {
+		procStatus = item.Status.UploadStatus
+	}
+
+	return &VideoVerification{
+		VideoID:          item.ID,
+		Title:            item.Snippet.Title,
+		UploadStatus:     item.Status.UploadStatus,
+		PrivacyStatus:    item.Status.PrivacyStatus,
+		ProcessingStatus: procStatus,
+		ShortURL:         shortURL,
+		WatchURL:         watchURL,
+	}, nil
 }

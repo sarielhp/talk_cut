@@ -14,15 +14,20 @@ type ChapterMarker struct {
 	Title        string        `json:"title"`
 }
 
-// FormatYouTubeLine returns the chapter line in YouTube format: "MM:SS Title".
+// FormatYouTubeLine returns the chapter line in YouTube format: "MM:SS Title" or "H:MM:SS Title".
 func (c ChapterMarker) FormatYouTubeLine() string {
 	totalSeconds := int(c.AdjustedTime.Seconds())
 	if totalSeconds < 0 {
 		totalSeconds = 0
 	}
 
-	minutes := totalSeconds / 60
+	hours := totalSeconds / 3600
+	minutes := (totalSeconds % 3600) / 60
 	seconds := totalSeconds % 60
+
+	if hours > 0 {
+		return fmt.Sprintf("%d:%02d:%02d %s", hours, minutes, seconds, c.Title)
+	}
 
 	return fmt.Sprintf("%02d:%02d %s", minutes, seconds, c.Title)
 }

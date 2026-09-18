@@ -91,3 +91,50 @@ func TestUploadCaption(t *testing.T) {
 		t.Fatalf("UploadCaption failed: %v", err)
 	}
 }
+
+func TestVerifyVideo(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			http.Error(w, "expected get", http.StatusMethodNotAllowed)
+			return
+		}
+		w.WriteHeader(http.StatusOK)
+		fmt.Fprintln(w, `{
+			"items": [{
+				"id": "vid_abc123",
+				"snippet": {"title": "Verified Talk"},
+				"status": {"uploadStatus": "uploaded", "privacyStatus": "unlisted"},
+				"processingDetails": {"processingStatus": "processing"}
+			}]
+		}`)
+	}))
+	defer ts.Close()
+
+	origEndpoint := videoStatusEndpoint
+	videoStatusEndpoint = ts.URL + "/videos?part=snippet,status,processingDetails"
+	defer func() { videoStatusEndpoint = origEndpoint }()
+
+	ver, err := VerifyVideo(context.Background(), ts.Client(), "vid_abc123")
+	if err != nil {
+		t.Fatalf("VerifyVideo failed: %v", err)
+	}
+
+	if ver.VideoID != "vid_abc123" {
+		t.Errorf("expected VideoID vid_abc123, got %q", ver.VideoID)
+	}
+	if ver.Title != "Verified Talk" {
+		t.Errorf("expected Title 'Verified Talk', got %q", ver.Title)
+	}
+	if ver.UploadStatus != "uploaded" {
+		t.Errorf("expected UploadStatus 'uploaded', got %q", ver.UploadStatus)
+	}
+	if ver.PrivacyStatus != "unlisted" {
+		t.Errorf("expected PrivacyStatus 'unlisted', got %q", ver.PrivacyStatus)
+	}
+	if ver.ProcessingStatus != "processing" {
+		t.Errorf("expected ProcessingStatus 'processing', got %q", ver.ProcessingStatus)
+	}
+	if ver.ShortURL != "https://youtu.be/vid_abc123" {
+		t.Errorf("expected ShortURL 'https://youtu.be/vid_abc123', got %q", ver.ShortURL)
+	}
+}

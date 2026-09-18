@@ -128,8 +128,8 @@ talk_cut --upload --channel seminar examples/26_09_08/
 
 | Key | Action |
 |---|---|
-| <kbd>←</kbd> / <kbd>→</kbd> | Switch between tabs (`[1] Cut Review` ↔ `[2] Metadata` ↔ `[3] Chapters` ↔ `[4] Export & Render`) |
-| <kbd>1</kbd>, <kbd>2</kbd>, <kbd>3</kbd>, <kbd>4</kbd> | Direct jump to respective tab |
+| <kbd>←</kbd> / <kbd>→</kbd> | Switch between tabs (`[1] Cut Review` ↔ `[2] Metadata` ↔ `[3] Chapters` ↔ `[4] Render` ↔ `[5] YouTube`) |
+| <kbd>1</kbd> .. <kbd>5</kbd> | Jump directly to tab 1, 2, 3, 4, or 5 |
 | <kbd>q</kbd> / <kbd>Ctrl+C</kbd> | Quit `talk_cut` |
 
 ---
@@ -190,8 +190,24 @@ talk_cut --upload --channel seminar examples/26_09_08/
 | Key | Action |
 |---|---|
 | <kbd>c</kbd> / <kbd>Enter</kbd> | Start FFmpeg lossless slice & concat pipeline |
+| <kbd>u</kbd> (when complete) | Switch directly to `[5] YouTube` upload screen |
 | <kbd>p</kbd> (when complete) | Play cut video in external video player (`ffplay`) |
 | <kbd>Esc</kbd> (before render) | Return to Cut Review screen |
+| <kbd>q</kbd> | Exit `talk_cut` |
+
+---
+
+### [5] YouTube Publish & Verification Screen
+
+| Key | Action |
+|---|---|
+| <kbd>u</kbd> / <kbd>Enter</kbd> | Start resumable video upload, captions sync, and YouTube verification |
+| <kbd>c</kbd> (before upload) | Cycle through configured YouTube channels (`default`, `seminar`, etc.) |
+| <kbd>o</kbd> (when published) | Open verified short URL (`https://youtu.be/<id>`) in default web browser |
+| <kbd>c</kbd> / <kbd>y</kbd> (when published) | Copy verified short URL to system clipboard (`wl-copy` / `xclip`) |
+| <kbd>p</kbd> | Preview local cut video in `ffplay` |
+| <kbd>r</kbd> | Retry upload or jump to render screen if video is not rendered |
+| <kbd>Esc</kbd> | Return to Cut Review screen |
 | <kbd>q</kbd> | Exit `talk_cut` |
 
 ---

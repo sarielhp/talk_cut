@@ -140,6 +140,39 @@ func (c *Config) SetChannelToken(channel, path string) {
 	}
 }
 
+// AvailableChannels returns all configured channel profile names, with defaultChannel first.
+func (c Config) AvailableChannels() []string {
+	channels := []string{}
+	seen := make(map[string]bool)
+	defaultCh := strings.TrimSpace(c.DefaultChannel)
+	if defaultCh != "" {
+		channels = append(channels, defaultCh)
+		seen[defaultCh] = true
+	}
+	for ch := range c.Channels {
+		ch = strings.TrimSpace(ch)
+		if ch != "" && !seen[ch] {
+			channels = append(channels, ch)
+			seen[ch] = true
+		}
+	}
+	if len(channels) == 0 {
+		channels = append(channels, "default")
+	}
+	return channels
+}
+
+// HasValidChannelToken checks if an OAuth2 token file exists on disk for the channel.
+func (c Config) HasValidChannelToken(channel string) bool {
+	tokenFile := c.ResolveChannelTokenFile(channel)
+	resolved, err := ResolvePath(tokenFile)
+	if err != nil {
+		return false
+	}
+	info, err := os.Stat(resolved)
+	return err == nil && info.Size() > 0
+}
+
 // GetAPIKey resolves and reads the API key.
 // Priority:
 // 1. OPENROUTER_API_KEY environment variable (if explicitly set)

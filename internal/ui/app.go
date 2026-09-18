@@ -17,6 +17,7 @@ import (
 	"talk_cut/internal/cutter"
 	"talk_cut/internal/model"
 	"talk_cut/internal/vtt"
+	"talk_cut/internal/youtube"
 )
 
 // Screen represents the currently active view.
@@ -31,6 +32,8 @@ const (
 	ScreenChapters
 	// ScreenProg displays pre-flight export summary, FFmpeg cutting progress, and final review.
 	ScreenProg
+	// ScreenYouTube displays interactive YouTube upload, streaming progress, and verification.
+	ScreenYouTube
 )
 
 type progressMsg cutter.CutProgress
@@ -47,6 +50,21 @@ type aiChaptersMsg struct {
 	err      error
 }
 
+type ytProgressMsg struct {
+	bytesSent  int64
+	totalBytes int64
+	percent    float64
+	stage      string
+}
+
+type ytDoneMsg struct {
+	verification    *youtube.VideoVerification
+	captionUploaded bool
+	err             error
+}
+
+type ytCopiedMsg struct{}
+
 // AppModel is the root Bubble Tea application model.
 type AppModel struct {
 	screen       Screen
@@ -54,13 +72,18 @@ type AppModel struct {
 	metaView     MetaModel
 	chaptersView ChaptersModel
 	progView     ProgModel
+	youtubeView  YouTubeModel
 	bundle       bundle.RecordingBundle
 	media        cutter.MediaInfo
 	progChan     chan cutter.CutProgress
 	doneChan     chan cutDoneMsg
+	ytProgChan   chan ytProgressMsg
+	ytDoneChan   chan ytDoneMsg
 	width        int
 	height       int
 	isCutting    bool
+	isUploading  bool
+	cfg          config.Config
 }
 
 // NewAppModel creates an initialized AppModel.
@@ -82,19 +105,29 @@ func NewAppModel(
 	stats := model.ComputeStats(cues, media.Duration)
 	progView.SetPreflight(meta, cuts, stats, b.PrimaryVideo)
 
+	cfg, _ := config.LoadConfig()
+	outBase := strings.TrimSuffix(defaultOutput, filepath.Ext(defaultOutput))
+	vttPath := outBase + ".vtt"
+	youtubeView := NewYouTubeModel(defaultOutput, vttPath, meta, cfg)
+
 	return AppModel{
 		screen:       ScreenCuts,
 		cutsView:     cutsView,
 		metaView:     metaView,
 		chaptersView: chaptersView,
 		progView:     progView,
+		youtubeView:  youtubeView,
 		bundle:       b,
 		media:        media,
 		progChan:     make(chan cutter.CutProgress, 32),
 		doneChan:     make(chan cutDoneMsg, 1),
+		ytProgChan:   make(chan ytProgressMsg, 32),
+		ytDoneChan:   make(chan ytDoneMsg, 1),
 		width:        100,
 		height:       30,
 		isCutting:    false,
+		isUploading:  false,
+		cfg:          cfg,
 	}
 }
 
@@ -119,6 +152,16 @@ func (a AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			a.progView.SetOutputPaths(msg.videoPath, msg.chaptersPath, msg.vttPath)
 		}
 		return a, nil
+	case ytProgressMsg:
+		cmd := a.youtubeView.SetProgress(msg.bytesSent, msg.totalBytes, msg.percent, msg.stage)
+		return a, tea.Batch(cmd, a.listenNextYtEvent())
+	case ytDoneMsg:
+		a.isUploading = false
+		a.youtubeView.SetDone(msg.verification, msg.captionUploaded, msg.err)
+		return a, nil
+	case ytCopiedMsg:
+		a.youtubeView.SetCopiedFeedback(true)
+		return a, nil
 	case aiChaptersMsg:
 		return a.handleAIChaptersMsg(msg)
 	case tea.KeyMsg:
@@ -136,6 +179,7 @@ func (a *AppModel) handleWindowSize(msg tea.WindowSizeMsg) {
 	a.metaView.SetDimensions(msg.Width, msg.Height)
 	a.chaptersView.SetDimensions(msg.Width, msg.Height)
 	a.progView.SetDimensions(msg.Width, msg.Height)
+	a.youtubeView.SetDimensions(msg.Width, msg.Height)
 }
 
 // isEditingText returns whether an active text input currently has focus.
@@ -191,6 +235,16 @@ func (a *AppModel) switchTab(target Screen) {
 		a.progView.SetPreflight(meta, cuts, stats, a.bundle.PrimaryVideo)
 	}
 
+	if target == ScreenYouTube {
+		meta := a.metaView.Metadata()
+		aligned := cutter.AlignChaptersToKeptCues(meta.Chapters, cues)
+		meta.Chapters = cutter.AdjustChapters(aligned, cuts, "Introduction")
+		outVideo := a.metaView.OutputPath()
+		outBase := strings.TrimSuffix(outVideo, filepath.Ext(outVideo))
+		vttPath := outBase + ".vtt"
+		a.youtubeView.SetPreflight(outVideo, vttPath, meta)
+	}
+
 	a.screen = target
 }
 
@@ -214,6 +268,8 @@ func (a AppModel) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return a.handleChaptersKey(msg)
 	case ScreenProg:
 		return a.handleProgKey(msg)
+	case ScreenYouTube:
+		return a.handleYouTubeKey(msg)
 	}
 
 	return a, nil
@@ -222,12 +278,12 @@ func (a AppModel) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 // handleGlobalNav routes Alt+arrows and numeric tab switching across all views.
 func (a *AppModel) handleGlobalNav(msg tea.KeyMsg) bool {
 	if msg.String() == "alt+left" || (msg.Alt && msg.Type == tea.KeyLeft) {
-		prev := (int(a.screen) - 1 + 4) % 4
+		prev := (int(a.screen) - 1 + 5) % 5
 		a.switchTab(Screen(prev))
 		return true
 	}
 	if msg.String() == "alt+right" || (msg.Alt && msg.Type == tea.KeyRight) {
-		next := (int(a.screen) + 1) % 4
+		next := (int(a.screen) + 1) % 5
 		a.switchTab(Screen(next))
 		return true
 	}
@@ -245,6 +301,9 @@ func (a *AppModel) handleGlobalNav(msg tea.KeyMsg) bool {
 			return true
 		case "4":
 			a.switchTab(ScreenProg)
+			return true
+		case "5":
+			a.switchTab(ScreenYouTube)
 			return true
 		}
 	}
@@ -322,9 +381,15 @@ func (a AppModel) handleChaptersKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 // handleProgKey processes keys on the progress and pre-flight screen.
 func (a AppModel) handleProgKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
-	if a.progView.IsDone() && (msg.String() == "q" || msg.String() == "esc") {
-		a.cutsView.Close()
-		return a, tea.Quit
+	if a.progView.IsDone() {
+		switch msg.String() {
+		case "q", "esc":
+			a.cutsView.Close()
+			return a, tea.Quit
+		case "u":
+			a.switchTab(ScreenYouTube)
+			return a, nil
+		}
 	}
 
 	if !a.isCutting {
@@ -428,6 +493,8 @@ func (a AppModel) forwardToActiveView(msg tea.Msg) (tea.Model, tea.Cmd) {
 		a.chaptersView, cmd = a.chaptersView.Update(msg)
 	case ScreenProg:
 		a.progView, cmd = a.progView.Update(msg)
+	case ScreenYouTube:
+		a.youtubeView, cmd = a.youtubeView.Update(msg)
 	}
 	return a, cmd
 }
@@ -443,6 +510,8 @@ func (a AppModel) View() string {
 		return a.chaptersView.View()
 	case ScreenProg:
 		return a.progView.View()
+	case ScreenYouTube:
+		return a.youtubeView.View()
 	}
 	return "talk_cut"
 }

@@ -53,7 +53,7 @@ func TestAppModelScreenTransitions(t *testing.T) {
 	}
 }
 
-func TestAppModelFourTabNavigation(t *testing.T) {
+func TestAppModelFiveTabNavigation(t *testing.T) {
 	b := bundle.RecordingBundle{
 		Dir:            t.TempDir(),
 		PrimaryVideo:   "test_video.mp4",
@@ -73,7 +73,7 @@ func TestAppModelFourTabNavigation(t *testing.T) {
 	app := NewAppModel(b, media, cues, meta, "output.mp4")
 	app.handleWindowSize(tea.WindowSizeMsg{Width: 100, Height: 30})
 
-	// Test direct numeric tab keys: 1, 2, 3, 4
+	// Test direct numeric tab keys: 1, 2, 3, 4, 5
 	tabs := []struct {
 		key      string
 		expected Screen
@@ -81,6 +81,7 @@ func TestAppModelFourTabNavigation(t *testing.T) {
 		{"2", ScreenMeta},
 		{"3", ScreenChapters},
 		{"4", ScreenProg},
+		{"5", ScreenYouTube},
 		{"1", ScreenCuts},
 		{"3", ScreenChapters},
 		{"2", ScreenMeta},
@@ -97,8 +98,8 @@ func TestAppModelFourTabNavigation(t *testing.T) {
 		}
 	}
 
-	// Test Alt+Right arrow cyclical navigation: 2 -> 3 -> 4 -> 1 -> 2
-	expectedRight := []Screen{ScreenChapters, ScreenProg, ScreenCuts, ScreenMeta}
+	// Test Alt+Right arrow cyclical navigation: 2 -> 3 -> 4 -> 5 -> 1 -> 2
+	expectedRight := []Screen{ScreenChapters, ScreenProg, ScreenYouTube, ScreenCuts, ScreenMeta}
 	for _, exp := range expectedRight {
 		res, _ := app.Update(tea.KeyMsg{Type: tea.KeyRight, Alt: true})
 		app = res.(AppModel)
@@ -107,8 +108,8 @@ func TestAppModelFourTabNavigation(t *testing.T) {
 		}
 	}
 
-	// Test Alt+Left arrow cyclical navigation: 2 -> 1 -> 4 -> 3 -> 2
-	expectedLeft := []Screen{ScreenCuts, ScreenProg, ScreenChapters, ScreenMeta}
+	// Test Alt+Left arrow cyclical navigation: 2 -> 1 -> 5 -> 4 -> 3 -> 2
+	expectedLeft := []Screen{ScreenCuts, ScreenYouTube, ScreenProg, ScreenChapters, ScreenMeta}
 	for _, exp := range expectedLeft {
 		res, _ := app.Update(tea.KeyMsg{Type: tea.KeyLeft, Alt: true})
 		app = res.(AppModel)

@@ -169,13 +169,23 @@ func initBadgesAndIcons(t *Theme) {
 		Foreground(t.Warning)
 }
 
-// RenderTabBar formats the persistent 4-tab navigation bar for any screen.
+// RenderTabBar formats the persistent 5-tab navigation bar for any screen.
 func RenderTabBar(activeTab, width int, theme Theme) string {
 	tabs := []string{
 		"[1] Cut Review",
 		"[2] Metadata",
 		"[3] Chapters",
-		"[4] Export & Render",
+		"[4] Render",
+		"[5] YouTube",
+	}
+	if width < 88 {
+		tabs = []string{
+			"[1] Cuts",
+			"[2] Meta",
+			"[3] Chapters",
+			"[4] Render",
+			"[5] YouTube",
+		}
 	}
 
 	var parts []string
