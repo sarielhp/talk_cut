@@ -45,8 +45,8 @@ func TestFormatTimestamp(t *testing.T) {
 	}
 
 	short := FormatTimestampShort(dur)
-	if short != "01:23:45" {
-		t.Errorf("FormatTimestampShort(%v) = %q, want %q", dur, short, "01:23:45")
+	if short != "83:45" {
+		t.Errorf("FormatTimestampShort(%v) = %q, want %q", dur, short, "83:45")
 	}
 
 	shortMin := FormatTimestampShort(4*time.Minute + 12*time.Second)

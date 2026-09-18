@@ -3,6 +3,7 @@ package cutter
 
 import (
 	"sort"
+	"strings"
 	"time"
 
 	"talk_cut/internal/model"
@@ -73,6 +74,10 @@ func AdjustChapters(original []model.ChapterMarker, cuts []model.CutInterval, de
 		if seenTimes[adjTime] {
 			continue
 		}
+		// Avoid consecutive duplicate chapter titles
+		if len(adjusted) > 0 && strings.EqualFold(adjusted[len(adjusted)-1].Title, ch.Title) {
+			continue
+		}
 		seenTimes[adjTime] = true
 
 		adjusted = append(adjusted, model.ChapterMarker{
@@ -92,11 +97,15 @@ func AdjustChapters(original []model.ChapterMarker, cuts []model.CutInterval, de
 		if defaultFirstTitle != "" {
 			title = defaultFirstTitle
 		}
-		adjusted = append([]model.ChapterMarker{{
-			OriginalTime: 0,
-			AdjustedTime: 0,
-			Title:        title,
-		}}, adjusted...)
+		if strings.EqualFold(adjusted[0].Title, title) || strings.Contains(strings.ToLower(adjusted[0].Title), "intro") {
+			adjusted[0].AdjustedTime = 0
+		} else {
+			adjusted = append([]model.ChapterMarker{{
+				OriginalTime: 0,
+				AdjustedTime: 0,
+				Title:        title,
+			}}, adjusted...)
+		}
 	}
 
 	return adjusted
@@ -116,4 +125,127 @@ func filterAndSortCuts(cuts []model.CutInterval) []model.CutInterval {
 	})
 
 	return filtered
+}
+
+// maxSnapDiff is the maximum distance a chapter will shift to align with a cue start.
+const maxSnapDiff = 45 * time.Second
+
+// SnapChaptersToCues aligns each chapter marker to the start time of the closest cue that is not deleted.
+func SnapChaptersToCues(chapters []model.ChapterMarker, cues []model.SubtitleCue) []model.ChapterMarker {
+	if len(cues) == 0 || len(chapters) == 0 {
+		return chapters
+	}
+	res := make([]model.ChapterMarker, len(chapters))
+	copy(res, chapters)
+	for i := range res {
+		cueTime, ok := closestCueStart(res[i].OriginalTime, cues, maxSnapDiff)
+		if ok {
+			res[i].OriginalTime = cueTime
+			res[i].AdjustedTime = cueTime
+		}
+	}
+	return AlignChaptersToKeptCues(res, cues)
+}
+
+// AlignChaptersToKeptCues ensures chapter starts automatically move to the first cue that is not deleted (ActionCut).
+func AlignChaptersToKeptCues(chapters []model.ChapterMarker, cues []model.SubtitleCue) []model.ChapterMarker {
+	if len(cues) == 0 || len(chapters) == 0 {
+		return chapters
+	}
+
+	res := make([]model.ChapterMarker, 0, len(chapters))
+	seenCues := make(map[time.Duration]bool)
+
+	for _, ch := range chapters {
+		cutIdx := findCutCueIndex(ch.OriginalTime, cues)
+		if cutIdx >= 0 {
+			keptIdx := findNextKeptCue(cutIdx, cues)
+			if keptIdx >= 0 {
+				ch.OriginalTime = cues[keptIdx].Start
+				ch.AdjustedTime = cues[keptIdx].Start
+			}
+		}
+
+		if seenCues[ch.OriginalTime] {
+			continue
+		}
+		seenCues[ch.OriginalTime] = true
+		res = append(res, ch)
+	}
+
+	sort.Slice(res, func(i, j int) bool {
+		return res[i].OriginalTime < res[j].OriginalTime
+	})
+	return res
+}
+
+// findCutCueIndex returns the index of a cue matching timestamp t if it is marked ActionCut.
+func findCutCueIndex(t time.Duration, cues []model.SubtitleCue) int {
+	for i, c := range cues {
+		if c.Start == t {
+			if c.Action == model.ActionCut {
+				return i
+			}
+			return -1
+		}
+	}
+	for i, c := range cues {
+		if c.Start <= t && t < c.End {
+			if c.Action == model.ActionCut {
+				return i
+			}
+			return -1
+		}
+	}
+	bestIdx := -1
+	minDiff := 2 * time.Second
+	for i, c := range cues {
+		diff := c.Start - t
+		if diff < 0 {
+			diff = -diff
+		}
+		if diff < minDiff {
+			minDiff = diff
+			bestIdx = i
+		}
+	}
+	if bestIdx >= 0 && cues[bestIdx].Action == model.ActionCut {
+		return bestIdx
+	}
+	return -1
+}
+
+// findNextKeptCue searches for the first non-deleted subtitle cue at or after startIdx.
+func findNextKeptCue(startIdx int, cues []model.SubtitleCue) int {
+	for i := startIdx; i < len(cues); i++ {
+		if cues[i].Action != model.ActionCut {
+			return i
+		}
+	}
+	for i := startIdx - 1; i >= 0; i-- {
+		if cues[i].Action != model.ActionCut {
+			return i
+		}
+	}
+	return -1
+}
+
+// closestCueStart finds the start timestamp of the subtitle cue closest to target time t within maxDiff.
+func closestCueStart(t time.Duration, cues []model.SubtitleCue, maxDiff time.Duration) (time.Duration, bool) {
+	bestIdx := -1
+	minDiff := time.Duration(1<<63 - 1)
+	for j, c := range cues {
+		diff := c.Start - t
+		if diff < 0 {
+			diff = -diff
+		}
+		if diff < minDiff {
+			minDiff = diff
+			bestIdx = j
+		}
+	}
+	if bestIdx >= 0 && minDiff <= maxDiff {
+		return cues[bestIdx].Start, true
+	}
+	return t, false
 }

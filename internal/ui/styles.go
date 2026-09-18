@@ -1,7 +1,11 @@
 // Package ui implements the interactive True-Color Bubble Tea terminal interface for talk_cut.
 package ui
 
-import "github.com/charmbracelet/lipgloss"
+import (
+	"strings"
+
+	"github.com/charmbracelet/lipgloss"
+)
 
 // Theme defines the True-Color Lip Gloss styling palette.
 type Theme struct {
@@ -15,11 +19,13 @@ type Theme struct {
 	Cursor     lipgloss.Color
 	Background lipgloss.Color
 	Surface    lipgloss.Color
+	Highlight  lipgloss.Color
 
 	TitleStyle     lipgloss.Style
 	SubtitleStyle  lipgloss.Style
 	CueNormal      lipgloss.Style
 	CueSelected    lipgloss.Style
+	RowSelected    lipgloss.Style
 	CueCut         lipgloss.Style
 	CueCutSelected lipgloss.Style
 	CueReview      lipgloss.Style
@@ -55,6 +61,7 @@ func DefaultTheme() Theme {
 		Cursor:     lipgloss.Color("#F43F5E"), // Rose
 		Background: lipgloss.Color("#0F172A"),
 		Surface:    lipgloss.Color("#1E293B"),
+		Highlight:  lipgloss.Color("#064E3B"), // Dark green for all active highlights
 	}
 
 	t.TitleStyle = lipgloss.NewStyle().
@@ -66,24 +73,7 @@ func DefaultTheme() Theme {
 	t.SubtitleStyle = lipgloss.NewStyle().
 		Foreground(t.Muted)
 
-	t.CueNormal = lipgloss.NewStyle().
-		Foreground(lipgloss.Color("#E2E8F0"))
-
-	t.CueSelected = lipgloss.NewStyle().
-		Bold(true).
-		Foreground(lipgloss.Color("#FFFFFF")).
-		Background(lipgloss.Color("#334155"))
-
-	t.CueCut = lipgloss.NewStyle().
-		Foreground(t.Danger)
-
-	t.CueCutSelected = lipgloss.NewStyle().
-		Bold(true).
-		Foreground(t.Danger).
-		Background(lipgloss.Color("#451A1A"))
-
-	t.CueReview = lipgloss.NewStyle().
-		Foreground(t.Warning)
+	initCueStyles(&t)
 
 	t.SpeakerStyle = lipgloss.NewStyle().
 		Bold(true).
@@ -116,6 +106,38 @@ func DefaultTheme() Theme {
 	t.HelpDesc = lipgloss.NewStyle().
 		Foreground(t.Muted)
 
+	initBadgesAndIcons(&t)
+
+	return t
+}
+
+func initCueStyles(t *Theme) {
+	t.CueNormal = lipgloss.NewStyle().
+		Foreground(lipgloss.Color("#E2E8F0"))
+
+	t.CueSelected = lipgloss.NewStyle().
+		Bold(true).
+		Foreground(lipgloss.Color("#FFFFFF")).
+		Background(t.Highlight)
+
+	t.RowSelected = lipgloss.NewStyle().
+		Bold(true).
+		Foreground(lipgloss.Color("#FFFFFF")).
+		Background(t.Highlight)
+
+	t.CueCut = lipgloss.NewStyle().
+		Foreground(t.Danger)
+
+	t.CueCutSelected = lipgloss.NewStyle().
+		Bold(true).
+		Foreground(t.Danger).
+		Background(lipgloss.Color("#451A1A"))
+
+	t.CueReview = lipgloss.NewStyle().
+		Foreground(t.Warning)
+}
+
+func initBadgesAndIcons(t *Theme) {
 	t.BadgeKept = lipgloss.NewStyle().
 		Bold(true).
 		Foreground(lipgloss.Color("#065F46")).
@@ -145,6 +167,27 @@ func DefaultTheme() Theme {
 	t.IconReview = lipgloss.NewStyle().
 		Bold(true).
 		Foreground(t.Warning)
+}
 
-	return t
+// RenderTabBar formats the persistent 4-tab navigation bar for any screen.
+func RenderTabBar(activeTab, width int, theme Theme) string {
+	tabs := []string{
+		"[1] Cut Review",
+		"[2] Metadata",
+		"[3] Chapters",
+		"[4] Export & Render",
+	}
+
+	var parts []string
+	for i, t := range tabs {
+		if i == activeTab {
+			parts = append(parts, theme.TitleStyle.Render(" "+t+" "))
+		} else {
+			parts = append(parts, theme.HelpDesc.Render(" "+t+" "))
+		}
+	}
+
+	appTitle := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("#FFFFFF")).Render(" talk_cut: ")
+	tabBar := appTitle + strings.Join(parts, " ")
+	return lipgloss.NewStyle().Width(width).Background(lipgloss.Color("#1E293B")).Render(tabBar)
 }

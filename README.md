@@ -35,6 +35,7 @@ flowchart TD
 - **Automated Zoom Bundle Ingestion**: Point `talk_cut` to any Zoom cloud recording folder or unpacked archive (e.g. `talk_cut recordings/2026-09-08/`). Automatically detects and correlates video streams, WebVTT subtitle transcripts, and chat logs.
 - **Smart Presentation Layout Selection**: Zoom bundles often record multiple video perspectives. Choose the optimal layout using `--layout` (`slides` with speaker thumbnail, `clean` slides without thumbnail, `speaker`, or `gallery`).
 - **AI Cut & Preamble Detection**: Analyzes the WebVTT transcript using token-optimized sampling with OpenRouter (Gemini 2.5 Flash Lite by default) to identify intro banter, microphone tests, slide transitions, dead pauses, and trailing audience Q&A.
+- **AI Natural Chapter Detection**: Automatically detects topical chapter shifts across the talk transcript (problem statement, theorems, algorithms, evaluations, conclusions), persisting markers in `talk_meta.json` and dynamically adjusting timestamps post-cut.
 - **Web Metadata Scraping & `talk_cal`**: Supply a seminar announcement web page (`-u <url>` or via the companion symlink `talk_cal <dir> <url>`) to automatically scrape the speaker's name, institutional affiliation, talk title, abstract, and tags.
 - **True-Color Split-Pane Terminal Interface**:
   - **Cut Reviewer**: Scroll through timestamped transcript cues with visual status indicators (`[✔ KEEP]`, `[✂ CUT]`), speaker labels, and AI rationale badges.
@@ -119,9 +120,21 @@ talk_cut --upload --channel seminar examples/26_09_08/
 
 ---
 
+---
+
 ## TUI Keyboard Shortcuts
 
-### Cut Review Screen
+### Global Navigation (All Screens)
+
+| Key | Action |
+|---|---|
+| <kbd>←</kbd> / <kbd>→</kbd> | Switch between tabs (`[1] Cut Review` ↔ `[2] Metadata` ↔ `[3] Chapters` ↔ `[4] Export & Render`) |
+| <kbd>1</kbd>, <kbd>2</kbd>, <kbd>3</kbd>, <kbd>4</kbd> | Direct jump to respective tab |
+| <kbd>q</kbd> / <kbd>Ctrl+C</kbd> | Quit `talk_cut` |
+
+---
+
+### [1] Cut Review Screen
 
 | Key | Action |
 |---|---|
@@ -131,45 +144,80 @@ talk_cut --upload --channel seminar examples/26_09_08/
 | <kbd>Space</kbd> / <kbd>x</kbd> | Toggle cue status between `[✔ KEEP]` and `[✂ CUT]` |
 | <kbd>p</kbd> | Launch external video preview (`mpv`/`vlc`/`ffplay`) at current cue timestamp |
 | <kbd>n</kbd> / <kbd>N</kbd> | Jump to next / previous cut region |
+| <kbd>[</kbd> / <kbd>]</kbd> | Jump to previous / next chapter marker in transcript |
+| <kbd>m</kbd> | Add or remove chapter marker bookmark (`🔖`) at focused cue |
 | <kbd>s</kbd> | Save current cut intervals to `talk_cuts.json` on disk |
-| <kbd>Tab</kbd> / <kbd>Enter</kbd> | Advance to Metadata & Chapter Editor screen |
-| <kbd>?</kbd> / <kbd>F1</kbd> | Toggle help modal overlay |
-| <kbd>q</kbd> / <kbd>Ctrl+C</kbd> | Quit `talk_cut` |
+| <kbd>r</kbd> / <kbd>Ctrl+A</kbd> | Regenerate natural chapters with AI (analyzes kept speech) |
+| <kbd>c</kbd> / <kbd>Ctrl+R</kbd> | Advance to Export & Render tab to execute video cutting |
+| <kbd>Tab</kbd> | Advance to Metadata screen |
+| <kbd>?</kbd> / <kbd>F1</kbd> | Toggle floating help dialog overlay |
 
-### Metadata & Chapter Editor Screen
+---
+
+### [2] Metadata Screen
 
 | Key | Action |
 |---|---|
-| <kbd>Tab</kbd> / <kbd>Shift+Tab</kbd> | Focus next / previous input field |
-| <kbd>↓</kbd> / <kbd>↑</kbd> | Scroll down / up through the form fields and preview cards |
+| <kbd>↓</kbd> / <kbd>↑</kbd> (or <kbd>j</kbd>/<kbd>k</kbd>) | Navigate between form fields and sections |
+| <kbd>Enter</kbd> | Enter edit mode for focused field (or commit on button) |
+| <kbd>Esc</kbd> / <kbd>Enter</kbd> | Exit edit mode (returns to global tab navigation) |
+| <kbd>Tab</kbd> / <kbd>Shift+Tab</kbd> | Cycle focus to next / previous input field |
 | <kbd>PgDn</kbd> / <kbd>PgUp</kbd> | Page scroll form viewport down / up |
 | <kbd>Home</kbd> / <kbd>End</kbd> | Scroll directly to top / bottom of form |
 | <kbd>Space</kbd> (on Privacy) | Cycle YouTube privacy (`unlisted` ↔ `public` ↔ `private`) |
-| <kbd>Esc</kbd> | Return to Cut Review screen (automatically saves metadata) |
-| <kbd>Ctrl+R</kbd> or <kbd>Enter</kbd> (on Commit) | Commit settings and begin FFmpeg slicing and rendering |
+| <kbd>Ctrl+A</kbd> / <kbd>r</kbd> | Regenerate natural chapters with AI (analyzes kept speech) |
+| <kbd>Esc</kbd> (when not editing) | Return to Cut Review screen (automatically saves metadata) |
+| <kbd>Ctrl+R</kbd> / <kbd>c</kbd> | Advance to Export & Render tab |
 
-### Progress & Completion Screen
+---
+
+### [3] YouTube Chapters Manager
 
 | Key | Action |
 |---|---|
-| <kbd>p</kbd> | Play completed cut video in external video player |
-| <kbd>q</kbd> / <kbd>Esc</kbd> | Exit `talk_cut` |
+| <kbd>↓</kbd> / <kbd>↑</kbd> (or <kbd>j</kbd>/<kbd>k</kbd>) | Select chapter marker in outline |
+| <kbd>Enter</kbd> / <kbd>e</kbd> | Edit chapter title in-place |
+| <kbd>d</kbd> / <kbd>x</kbd> | Delete currently selected chapter marker |
+| <kbd>a</kbd> | Add new chapter marker |
+| <kbd>p</kbd> | Preview video playback at chapter start timestamp |
+| <kbd>r</kbd> / <kbd>Ctrl+A</kbd> | Auto-detect chapters with AI from kept speech |
+| <kbd>Esc</kbd> | Return to Cut Review screen |
+
+---
+
+### [4] Export & Render Screen
+
+| Key | Action |
+|---|---|
+| <kbd>c</kbd> / <kbd>Enter</kbd> | Start FFmpeg lossless slice & concat pipeline |
+| <kbd>p</kbd> (when complete) | Play cut video in external video player (`ffplay`) |
+| <kbd>Esc</kbd> (before render) | Return to Cut Review screen |
+| <kbd>q</kbd> | Exit `talk_cut` |
 
 ---
 
 ## Multi-Channel YouTube Publishing
 
-### 1. Obtain Google OAuth Credentials
-1. Go to the [Google Cloud Console](https://console.cloud.google.com/).
-2. Create a project and enable the **YouTube Data API v3**.
-3. Configure an **OAuth Consent Screen** (User Type: External, Testing or Published).
-4. Create an **OAuth 2.0 Client ID** with Application Type set to **Desktop app**.
-5. Download the client secrets JSON file.
-
-### 2. Authorize a YouTube Channel
-Run the built-in authorization command for a given channel profile (e.g. `seminar`):
+### 1. Guided Setup & Detailed Guide
+`talk_cut` includes an interactive setup wizard and comprehensive built-in documentation:
 
 ```bash
+# Print full, detailed step-by-step setup guide (GCP console, consent screen, quotas, etc.):
+talk_cut youtube setup -H
+
+# Run interactive terminal setup wizard:
+talk_cut youtube setup
+
+# Inspect configured channels and token validity:
+talk_cut youtube status
+```
+
+### 2. Direct Channel Authorization
+To authorize or re-authorize a channel directly:
+
+```bash
+talk_cut youtube auth --channel seminar
+# or (backward compatible):
 talk_cut auth --channel seminar /path/to/client_secrets.json
 ```
 
@@ -205,7 +253,7 @@ Configuration is stored in `~/.config/talk_cut/config.json`:
   "key_file": "~/.config/auth/openrouter_api_key",
   "model": "google/gemini-2.5-flash-lite",
   "base_url": "https://openrouter.ai/api/v1",
-  "default_privacy": "unlisted",
+  "default_privacy": "public",
   "preferred_layout": "slides",
   "default_channel": "seminar",
   "channels": {
@@ -260,7 +308,9 @@ Running `talk_cut` generates the following files in the recording directory:
 Usage:
   talk_cut [options] <recording-directory> [announcement-url]
   talk_cal <recording-directory> <announcement-url>
-  talk_cut auth [options] [client_secrets.json]
+  talk_cut youtube setup [-H]            Interactive guided setup (-H for detailed guide)
+  talk_cut youtube status                Inspect configured YouTube channels and tokens
+  talk_cut auth [options] [secrets.json] Direct OAuth browser authorization
 
 Options:
   -o, --output <path>    Custom output destination for sliced video

@@ -49,7 +49,7 @@ config_to_save = {
   'key_file' => existing_conf['key_file'] || '~/.config/auth/openrouter_api_key',
   'model' => model || existing_conf['model'] || 'google/gemini-2.5-flash-lite',
   'base_url' => existing_conf['base_url'] || 'https://openrouter.ai/api/v1',
-  'default_privacy' => existing_conf['default_privacy'] || 'unlisted',
+  'default_privacy' => existing_conf['default_privacy'] || 'public',
   'preferred_layout' => existing_conf['preferred_layout'] || 'slides',
   'youtube_secrets' => existing_conf['youtube_secrets'] || '~/.config/talk_cut/client_secrets.json'
 }

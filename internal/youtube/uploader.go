@@ -16,7 +16,7 @@ import (
 
 var (
 	videosEndpoint   = "https://www.googleapis.com/upload/youtube/v3/videos?uploadType=resumable&part=snippet,status"
-	captionsEndpoint = "https://www.googleapis.com/upload/youtube/v3/captions?part=snippet"
+	captionsEndpoint = "https://www.googleapis.com/upload/youtube/v3/captions?uploadType=multipart&part=snippet"
 )
 
 // UploadOptions specifies video and metadata parameters for YouTube upload.
@@ -70,8 +70,8 @@ func UploadVideo(ctx context.Context, client *http.Client, opts UploadOptions) (
 // initiateResumableUpload sends initial metadata to obtain the unique resumable upload location.
 func initiateResumableUpload(ctx context.Context, client *http.Client, meta model.TalkMetadata, size int64) (string, error) {
 	privacy := strings.ToLower(meta.Privacy)
-	if privacy != "public" && privacy != "private" {
-		privacy = "unlisted"
+	if privacy != "unlisted" && privacy != "private" {
+		privacy = "public"
 	}
 
 	payload := map[string]any{

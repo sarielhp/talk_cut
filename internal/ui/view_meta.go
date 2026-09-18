@@ -66,7 +66,13 @@ type MetaModel struct {
 	width        int
 	height       int
 	scrollOffset int
+	isEditing    bool
 	statusMsg    string
+}
+
+// IsEditing returns whether the user is actively editing a text field.
+func (m MetaModel) IsEditing() bool {
+	return m.isEditing
 }
 
 // NewMetaModel creates an initialized MetaModel with inputs pre-populated.
@@ -94,9 +100,9 @@ func NewMetaModel(meta model.TalkMetadata, cuts []model.CutInterval, defaultOutp
 		t.Prompt = labels[i] + ": "
 		t.PromptStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("#818CF8")).Bold(true)
 		t.SetValue(values[i])
+		t.Blur()
 		inputs[i] = t
 	}
-	inputs[0].Focus()
 
 	privacyOpts := []string{"unlisted", "public", "private"}
 	pIdx := 0
@@ -120,7 +126,8 @@ func NewMetaModel(meta model.TalkMetadata, cuts []model.CutInterval, defaultOutp
 		width:        100,
 		height:       30,
 		scrollOffset: 0,
-		statusMsg:    "↑/↓: scroll | Tab/Shift-Tab: fields | Space: privacy | Ctrl+R: cut | Esc: cuts",
+		isEditing:    false,
+		statusMsg:    "↑/↓: fields | Enter: edit | Space: privacy | Alt+←/→: tabs | 1-4: screen",
 	}
 }
 
@@ -172,9 +179,19 @@ func (m *MetaModel) UpdateCuts(cuts []model.CutInterval) {
 	m.cuts = cuts
 }
 
+// SetChapters updates the talk's chapter markers.
+func (m *MetaModel) SetChapters(chapters []model.ChapterMarker) {
+	m.metadata.Chapters = chapters
+}
+
+// SetFeedback updates the status feedback banner in the footer.
+func (m *MetaModel) SetFeedback(msg string, _ bool) {
+	m.statusMsg = msg
+}
+
 // visibleBodyHeight returns the available lines for scrolling body content.
 func (m MetaModel) visibleBodyHeight() int {
-	h := m.height - 3
+	h := m.height - 2
 	if h < 5 {
 		return 5
 	}
@@ -193,6 +210,16 @@ func (m MetaModel) Update(msg tea.Msg) (MetaModel, tea.Cmd) {
 
 // handleKey processes keyboard shortcuts on the metadata screen.
 func (m MetaModel) handleKey(msg tea.KeyMsg) (MetaModel, tea.Cmd) {
+	if m.isEditing {
+		switch msg.String() {
+		case "enter", "esc":
+			m.isEditing = false
+			m.blurCurrent()
+			return m, nil
+		}
+		return m.updateInputs(msg)
+	}
+
 	allLines, ranges := m.buildContentLines(m.width)
 	totalLines := len(allLines)
 	visibleHeight := m.visibleBodyHeight()
@@ -202,7 +229,7 @@ func (m MetaModel) handleKey(msg tea.KeyMsg) (MetaModel, tea.Cmd) {
 	}
 
 	switch msg.String() {
-	case "down":
+	case "down", "j":
 		if m.scrollOffset < maxScroll {
 			m.scrollOffset++
 			m.updateFocusFromScroll(ranges)
@@ -213,7 +240,7 @@ func (m MetaModel) handleKey(msg tea.KeyMsg) (MetaModel, tea.Cmd) {
 			m.scrollToField(m.focusIndex, ranges, visibleHeight, maxScroll)
 			return m, nil
 		}
-	case "up":
+	case "up", "k":
 		if m.scrollOffset > 0 {
 			m.scrollOffset--
 			m.updateFocusFromScroll(ranges)
@@ -263,7 +290,16 @@ func (m MetaModel) handleKey(msg tea.KeyMsg) (MetaModel, tea.Cmd) {
 		m.updateFocusFromScroll(ranges)
 		return m, nil
 	case "enter":
+		if m.focusIndex == fieldPrivacy {
+			m.privacyIdx = (m.privacyIdx + 1) % len(m.privacyOpts)
+			return m, nil
+		}
 		if m.focusIndex == fieldCommit {
+			return m, nil
+		}
+		if m.inputIndexForField(m.focusIndex) >= 0 {
+			m.isEditing = true
+			m.focusCurrent()
 			return m, nil
 		}
 		m.cycleFocus(1)
@@ -276,7 +312,7 @@ func (m MetaModel) handleKey(msg tea.KeyMsg) (MetaModel, tea.Cmd) {
 		}
 	}
 
-	return m.updateInputs(msg)
+	return m, nil
 }
 
 // cycleFocus advances or retreats the focused field index.
@@ -441,13 +477,13 @@ func (m MetaModel) buildContentLines(width int) ([]string, []fieldRange) {
 	headerBox := m.theme.SidebarBox.Width(contentWidth - 2).Render("TALK & EXPORT CONFIGURATION")
 	appendBlock(-1, headerBox)
 
-	appendBlock(fieldTitle, m.renderFieldBox(fieldTitle, contentWidth, m.inputs[0].View()))
-	appendBlock(fieldSpeaker, m.renderFieldBox(fieldSpeaker, contentWidth, m.inputs[1].View()))
-	appendBlock(fieldAffiliation, m.renderFieldBox(fieldAffiliation, contentWidth, m.inputs[2].View()))
+	appendBlock(fieldTitle, m.renderInputField(fieldTitle, 0, contentWidth))
+	appendBlock(fieldSpeaker, m.renderInputField(fieldSpeaker, 1, contentWidth))
+	appendBlock(fieldAffiliation, m.renderInputField(fieldAffiliation, 2, contentWidth))
 	appendBlock(fieldURL, m.renderURLField(contentWidth))
-	appendBlock(fieldTags, m.renderFieldBox(fieldTags, contentWidth, m.inputs[4].View()))
+	appendBlock(fieldTags, m.renderInputField(fieldTags, 4, contentWidth))
 	appendBlock(fieldPrivacy, m.renderPrivacyField(contentWidth))
-	appendBlock(fieldOutputPath, m.renderFieldBox(fieldOutputPath, contentWidth, m.inputs[5].View()))
+	appendBlock(fieldOutputPath, m.renderInputField(fieldOutputPath, 5, contentWidth))
 	appendBlock(fieldAbstract, m.renderAbstractBox(contentWidth))
 	appendBlock(-1, m.renderChaptersBox(contentWidth))
 	appendBlock(fieldCommit, m.renderCommitButton(contentWidth))
@@ -455,42 +491,70 @@ func (m MetaModel) buildContentLines(width int) ([]string, []fieldRange) {
 	return allLines, ranges
 }
 
-// renderHeader renders the top title bar for the metadata screen.
+// renderHeader renders the top persistent tab bar for the metadata screen.
 func (m MetaModel) renderHeader() string {
-	title := m.theme.TitleStyle.Render(" talk_cut > METADATA & CHAPTERS ")
-	bar := lipgloss.NewStyle().Width(m.width).MarginBottom(1).Render(title)
-	return bar
+	return RenderTabBar(1, m.width, m.theme)
 }
 
-// renderFieldBox wraps an input view with styling based on focus.
-func (m MetaModel) renderFieldBox(field, width int, content string) string {
-	style := lipgloss.NewStyle().Width(width-2).Padding(0, 1)
-	if m.focusIndex == field {
-		style = style.Background(lipgloss.Color("#1E293B")).Bold(true)
+// renderInputField renders an editable textinput with pale yellow highlight when active.
+func (m MetaModel) renderInputField(field, inputIdx, width int) string {
+	paleYellow := lipgloss.Color("#FEF9C3")
+	darkText := lipgloss.Color("#0F172A")
+	darkPrompt := lipgloss.Color("#1E3A8A")
+
+	inp := m.inputs[inputIdx]
+	isFocused := m.focusIndex == field
+
+	if isFocused {
+		inp.PromptStyle = lipgloss.NewStyle().Foreground(darkPrompt).Bold(true).Background(paleYellow)
+		inp.TextStyle = lipgloss.NewStyle().Foreground(darkText).Background(paleYellow)
+		inp.Cursor.Style = lipgloss.NewStyle().Foreground(lipgloss.Color("#DC2626")).Background(paleYellow)
+		rendered := inp.View()
+		boxStyle := lipgloss.NewStyle().Width(width-2).Padding(0, 1).Background(paleYellow).Foreground(darkText)
+		return boxStyle.Render(rendered)
 	}
-	return style.Render(content)
+
+	inp.PromptStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("#818CF8")).Bold(true)
+	inp.TextStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("#E2E8F0"))
+	inp.Cursor.Style = lipgloss.NewStyle()
+	rendered := inp.View()
+	boxStyle := lipgloss.NewStyle().Width(width-2).Padding(0, 1)
+	return boxStyle.Render(rendered)
 }
 
-// renderURLField renders the talk URL with terminal hyperlink OSC 8 embedding.
+// renderURLField renders the talk URL with terminal hyperlink OSC 8 embedding and pale yellow highlight when active.
 func (m MetaModel) renderURLField(width int) string {
-	urlVal := m.inputs[3].Value()
-	if m.focusIndex == fieldURL {
-		boxContent := m.inputs[3].View()
+	paleYellow := lipgloss.Color("#FEF9C3")
+	darkText := lipgloss.Color("#0F172A")
+	darkPrompt := lipgloss.Color("#1E3A8A")
+	isFocused := m.focusIndex == fieldURL
+
+	inp := m.inputs[3]
+	if isFocused {
+		inp.PromptStyle = lipgloss.NewStyle().Foreground(darkPrompt).Bold(true).Background(paleYellow)
+		inp.TextStyle = lipgloss.NewStyle().Foreground(darkText).Background(paleYellow)
+		inp.Cursor.Style = lipgloss.NewStyle().Foreground(lipgloss.Color("#DC2626")).Background(paleYellow)
+		boxContent := inp.View()
+		urlVal := inp.Value()
 		if urlVal != "" {
-			styledURL := m.theme.PrimaryText.Underline(true).Render(urlVal)
+			styledURL := lipgloss.NewStyle().Foreground(lipgloss.Color("#1D4ED8")).Underline(true).Background(paleYellow).Render(urlVal)
 			embedded := termenv.Hyperlink(urlVal, styledURL)
-			boxContent += "\n  " + m.theme.SubtitleStyle.Render("Embedded: ") + embedded
+			embedLabel := lipgloss.NewStyle().Foreground(lipgloss.Color("#475569")).Background(paleYellow).Render("Embedded: ")
+			boxContent += "\n  " + embedLabel + embedded
 		}
-		return m.renderFieldBox(fieldURL, width, boxContent)
+		boxStyle := lipgloss.NewStyle().Width(width-2).Padding(0, 1).Background(paleYellow).Foreground(darkText)
+		return boxStyle.Render(boxContent)
 	}
 
+	urlVal := inp.Value()
 	label := lipgloss.NewStyle().Foreground(lipgloss.Color("#818CF8")).Bold(true).Render("URL: ")
 	if urlVal == "" {
-		return m.renderFieldBox(fieldURL, width, label+m.theme.HelpDesc.Render("(none)"))
+		boxContent := label + m.theme.HelpDesc.Render("(none)")
+		return lipgloss.NewStyle().Width(width-2).Padding(0, 1).Render(boxContent)
 	}
 	styledURL := m.theme.PrimaryText.Underline(true).Render(urlVal)
 	embedded := termenv.Hyperlink(urlVal, styledURL)
-	return m.renderFieldBox(fieldURL, width, label+embedded)
+	return lipgloss.NewStyle().Width(width-2).Padding(0, 1).Render(label + embedded)
 }
 
 // renderPrivacyField renders the privacy selector.
@@ -508,7 +572,7 @@ func (m MetaModel) renderPrivacyField(width int) string {
 
 	style := lipgloss.NewStyle().Width(width-2).Padding(0, 1)
 	if m.focusIndex == fieldPrivacy {
-		style = style.Background(lipgloss.Color("#1E293B"))
+		style = style.Background(m.theme.Highlight).Foreground(lipgloss.Color("#FFFFFF")).Bold(true)
 	}
 	return style.Render(line)
 }
@@ -536,7 +600,7 @@ func (m MetaModel) renderAbstractBox(width int) string {
 	content := label + "\n" + body
 	boxStyle := m.theme.SidebarBox.Width(boxWidth)
 	if m.focusIndex == fieldAbstract {
-		boxStyle = boxStyle.BorderForeground(m.theme.Primary).Background(lipgloss.Color("#1E293B"))
+		boxStyle = boxStyle.BorderForeground(lipgloss.Color("#34D399")).Background(m.theme.Highlight)
 	}
 	return boxStyle.Render(content)
 }
@@ -550,24 +614,24 @@ func (m MetaModel) renderChaptersBox(width int) string {
 
 	adjChapters := cutter.AdjustChapters(m.metadata.Chapters, m.cuts, "Introduction")
 	var chLines []string
-	chLines = append(chLines, lipgloss.NewStyle().Foreground(lipgloss.Color("#818CF8")).Bold(true).Render("YOUTUBE CHAPTERS PREVIEW"))
+
+	header := lipgloss.NewStyle().Foreground(lipgloss.Color("#818CF8")).Bold(true).Render("YOUTUBE CHAPTERS PREVIEW & UPLOAD PREVIEW")
+	metaPreview := fmt.Sprintf(
+		"Title: %s  |  Speaker: %s  |  Privacy: %s",
+		m.inputs[0].Value(),
+		m.inputs[1].Value(),
+		strings.ToUpper(m.privacyOpts[m.privacyIdx]),
+	)
+	chLines = append(chLines, header, metaPreview)
 
 	if len(adjChapters) == 0 {
 		chLines = append(chLines, "  00:00 Introduction (full talk)")
+		chLines = append(chLines, "  (Press Ctrl+A to auto-generate chapters from kept speech)")
 	} else {
 		for _, ch := range adjChapters {
 			chLines = append(chLines, "  "+ch.FormatYouTubeLine())
 		}
 	}
-
-	metaPreview := fmt.Sprintf(
-		"UPLOAD PREVIEW\nTitle:   %s\nSpeaker: %s\nPrivacy: %s\nOutput:  %s",
-		m.inputs[0].Value(),
-		m.inputs[1].Value(),
-		strings.ToUpper(m.privacyOpts[m.privacyIdx]),
-		m.OutputPath(),
-	)
-	chLines = append(chLines, metaPreview)
 
 	return m.theme.SidebarBox.Width(boxWidth).Render(strings.Join(chLines, "\n"))
 }
@@ -582,7 +646,7 @@ func (m MetaModel) renderCommitButton(width int) string {
 		MarginTop(1)
 
 	if m.focusIndex == fieldCommit {
-		style = style.Background(lipgloss.Color("#059669")).Underline(true)
+		style = style.Background(m.theme.Highlight).Underline(true)
 	}
 
 	return lipgloss.NewStyle().Width(width).Align(lipgloss.Center).Render(style.Render(btnText))
@@ -604,8 +668,10 @@ func (m MetaModel) renderFooter(totalLines, visibleHeight int) string {
 	}
 
 	msg := m.statusMsg
-	if msg == "" {
-		msg = "↑/↓: scroll | Tab/Shift-Tab: fields | Space: privacy | Ctrl+R: cut | Esc: cuts"
+	if m.isEditing {
+		msg = "Editing field... Enter/Esc: done | ←/→: move cursor"
+	} else if msg == "" {
+		msg = "↑/↓: fields | Enter: edit | Space: privacy | Alt+←/→: tabs | 1-4: screen"
 	}
 	bar := m.theme.HelpDesc.Render(" " + msg + scrollInfo)
 	return lipgloss.NewStyle().Width(m.width).Render(bar)

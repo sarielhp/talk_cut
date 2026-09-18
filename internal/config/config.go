@@ -28,7 +28,7 @@ func DefaultConfig() Config {
 		KeyFile:          "~/.config/auth/openrouter_api_key",
 		Model:            "google/gemini-2.5-flash-lite",
 		BaseURL:          "https://openrouter.ai/api/v1",
-		DefaultPrivacy:   "unlisted",
+		DefaultPrivacy:   "public",
 		PreferredLayout:  "slides",
 		YouTubeSecrets:   "~/.config/auth/youtube_client_secrets.json",
 		YouTubeTokenFile: "~/.config/auth/youtube_token.json",
@@ -207,6 +207,10 @@ func (c Config) SaveConfig() error {
 	dir := filepath.Join(home, ".config", "talk_cut")
 	if dirErr := os.MkdirAll(dir, 0o755); dirErr != nil {
 		return fmt.Errorf("creating config dir %q: %w", dir, dirErr)
+	}
+
+	if c.DefaultPrivacy == "" {
+		c.DefaultPrivacy = "public"
 	}
 
 	path := filepath.Join(dir, "config.json")

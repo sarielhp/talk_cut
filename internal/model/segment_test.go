@@ -55,7 +55,7 @@ func TestChapterFormat(t *testing.T) {
 		{
 			name:     "Over an hour",
 			marker:   ChapterMarker{AdjustedTime: 1*time.Hour + 4*time.Minute + 5*time.Second, Title: "Q&A"},
-			expected: "01:04:05 Q&A",
+			expected: "64:05 Q&A",
 		},
 	}
 

@@ -55,8 +55,13 @@ func main() {
 }
 
 func run(args []string) error {
-	if len(args) > 0 && args[0] == "auth" {
-		return runAuth(args[1:])
+	if len(args) > 0 {
+		switch args[0] {
+		case "auth":
+			return runAuth(args[1:])
+		case "youtube":
+			return runYouTube(args[1:])
+		}
 	}
 
 	opts, err := parseCLIFlags(args)
@@ -80,6 +85,16 @@ func run(args []string) error {
 			return fmt.Errorf("loading config: %w", cfgErr)
 		}
 		return runMetaOnly(ctx, opts, cfg)
+	}
+
+	if opts.upload {
+		ctx := context.Background()
+		cfg, cfgErr := config.LoadConfig()
+		if cfgErr != nil {
+			return fmt.Errorf("loading config: %w", cfgErr)
+		}
+		applyConfigOverrides(&cfg, opts)
+		return runUploadPipeline(ctx, opts, cfg)
 	}
 
 	return executePipeline(opts)
@@ -125,6 +140,110 @@ func runAuth(args []string) error {
 	fmt.Printf("Token saved: %s\n", targetToken)
 	fmt.Println("Config updated: ~/.config/talk_cut/config.json")
 	return nil
+}
+
+// runYouTube dispatches youtube subcommands (setup, auth, status).
+func runYouTube(args []string) error {
+	if len(args) == 0 {
+		printYouTubeUsage()
+		return nil
+	}
+
+	switch args[0] {
+	case "setup":
+		return runYouTubeSetup(args[1:])
+	case "auth":
+		return runAuth(args[1:])
+	case "status":
+		return runYouTubeStatus(args[1:])
+	case "-H", "--guide":
+		youtube.PrintDetailedSetupGuide(os.Stdout)
+		return nil
+	case "-h", "--help", "help":
+		printYouTubeUsage()
+		return nil
+	default:
+		return fmt.Errorf("unknown youtube command %q. Run 'talk_cut youtube --help' for usage", args[0])
+	}
+}
+
+// runYouTubeSetup runs the interactive guided YouTube setup flow or prints detailed help.
+func runYouTubeSetup(args []string) error {
+	fs := flag.NewFlagSet("talk_cut youtube setup", flag.ContinueOnError)
+	var showDetailedHelp, showHelp, nonInteractive bool
+	var channel, secretsPath, tokenPath string
+
+	fs.BoolVar(&showDetailedHelp, "H", false, "Display comprehensive step-by-step YouTube setup guide")
+	fs.BoolVar(&showHelp, "h", false, "Display brief help")
+	fs.BoolVar(&showHelp, "help", false, "Display brief help")
+	fs.BoolVar(&nonInteractive, "non-interactive", false, "Fail instead of prompting if input is missing")
+	fs.StringVar(&channel, "channel", "", "Target YouTube channel profile name")
+	fs.StringVar(&secretsPath, "secrets", "", "Path to Google Cloud client secrets JSON")
+	fs.StringVar(&tokenPath, "token", "", "Path to store OAuth token")
+
+	if err := fs.Parse(args); err != nil {
+		if errors.Is(err, flag.ErrHelp) {
+			return nil
+		}
+		return err
+	}
+
+	if showDetailedHelp {
+		youtube.PrintDetailedSetupGuide(os.Stdout)
+		return nil
+	}
+	if showHelp {
+		printYouTubeSetupUsage()
+		return nil
+	}
+
+	if fs.NArg() > 0 && secretsPath == "" {
+		secretsPath = fs.Arg(0)
+	}
+
+	cfg, err := config.LoadConfig()
+	if err != nil {
+		return fmt.Errorf("loading config: %w", err)
+	}
+
+	opts := youtube.SetupOptions{
+		Channel:        channel,
+		SecretsPath:    secretsPath,
+		TokenPath:      tokenPath,
+		NonInteractive: nonInteractive,
+	}
+
+	return youtube.RunGuidedSetup(context.Background(), os.Stdin, os.Stdout, cfg, opts, youtube.Authorize)
+}
+
+// runYouTubeStatus displays the current YouTube credentials and channel tokens.
+func runYouTubeStatus(args []string) error {
+	cfg, err := config.LoadConfig()
+	if err != nil {
+		return fmt.Errorf("loading config: %w", err)
+	}
+	return youtube.RunYouTubeStatus(os.Stdout, cfg)
+}
+
+// printYouTubeUsage outputs CLI usage for the youtube subcommand group.
+func printYouTubeUsage() {
+	fmt.Println("Usage:")
+	fmt.Println("  talk_cut youtube setup [-H]      Interactive guided YouTube setup (-H for detailed guide)")
+	fmt.Println("  talk_cut youtube auth [options]  Direct OAuth browser authorization")
+	fmt.Println("  talk_cut youtube status          Inspect configured YouTube channels and tokens")
+	fmt.Println("\nRun 'talk_cut youtube setup -H' for the full step-by-step setup guide.")
+}
+
+// printYouTubeSetupUsage outputs CLI usage for the youtube setup command.
+func printYouTubeSetupUsage() {
+	fmt.Println("Usage: talk_cut youtube setup [options] [client_secrets.json]")
+	fmt.Println("\nOptions:")
+	fmt.Println("  -H                     Display comprehensive step-by-step YouTube setup guide")
+	fmt.Println("  --channel <name>       Target YouTube channel profile name (default: default)")
+	fmt.Println("  --secrets <path>       Path to Google Cloud client secrets JSON")
+	fmt.Println("  --token <path>         Path to store OAuth token")
+	fmt.Println("  --non-interactive      Fail instead of prompting if input is missing")
+	fmt.Println("  -h, --help             Show this help screen")
 }
 
 // isURL checks if a string begins with http:// or https://.
@@ -212,6 +331,10 @@ func executePipeline(opts *cliOptions) error {
 	} else if !opts.noAI {
 		cues = runAICutDetection(ctx, opts.dir, cfg, cues, &talkMeta)
 		_ = model.SaveCutsFile(opts.dir, model.BuildCutIntervals(cues))
+	}
+
+	if !opts.noAI && (len(talkMeta.Chapters) == 0 || opts.reDetect) {
+		runAIChapterDetection(ctx, opts.dir, cfg, cues, &talkMeta)
 	}
 
 	outPath := resolveOutputPath(opts.dir, b.PrimaryVideo, opts.output)
@@ -369,6 +492,26 @@ func runAICutDetection(ctx context.Context, dir string, cfg config.Config, cues 
 	return cues
 }
 
+// runAIChapterDetection queries OpenRouter to detect natural talk chapters if not already set.
+func runAIChapterDetection(ctx context.Context, dir string, cfg config.Config, cues []model.SubtitleCue, meta *model.TalkMetadata) {
+	client, err := ai.NewClient(cfg)
+	if err != nil {
+		return
+	}
+
+	chapters, err := ai.DetectChapters(ctx, client, cues, meta.Title, meta.Abstract)
+	if err != nil || len(chapters) == 0 {
+		return
+	}
+
+	meta.Chapters = chapters
+	fmt.Printf("✔ AI detected %d natural chapters\n", len(chapters))
+	for _, ch := range chapters {
+		fmt.Printf("  %s %s\n", vtt.FormatTimestampShort(ch.OriginalTime), ch.Title)
+	}
+	_ = model.SaveMetaFile(dir, *meta)
+}
+
 // resolveOutputPath computes the default destination path for the cut video.
 func resolveOutputPath(dir, primaryVideo, userOutput string) string {
 	if userOutput != "" {
@@ -416,6 +559,14 @@ func printDryRunReport(b *bundle.RecordingBundle, media cutter.MediaInfo, cues [
 	if meta.Title != "" || meta.Speaker != "" {
 		fmt.Printf("\nMetadata:\n  Title:   %s\n  Speaker: %s\n", meta.Title, meta.Speaker)
 	}
+
+	if len(meta.Chapters) > 0 {
+		fmt.Println("\nAdjusted YouTube Chapters:")
+		adj := cutter.AdjustChapters(meta.Chapters, intervals, "Introduction")
+		for _, ch := range adj {
+			fmt.Printf("  %s\n", ch.FormatYouTubeLine())
+		}
+	}
 }
 
 // printHelp outputs CLI usage instructions.
@@ -424,14 +575,16 @@ func printHelp() {
 	fmt.Println("Usage:")
 	fmt.Println("  talk_cut [options] <recording-directory> [announcement-url]")
 	fmt.Println("  talk_cal <recording-directory> <announcement-url>")
-	fmt.Println("  talk_cut auth [options] [client_secrets.json]")
+	fmt.Println("  talk_cut youtube setup [-H]            Interactive guided setup (-H for detailed guide)")
+	fmt.Println("  talk_cut youtube status                Inspect configured YouTube channels and tokens")
+	fmt.Println("  talk_cut auth [options] [secrets.json] Direct OAuth browser authorization")
 	fmt.Println("\nOptions:")
 	fmt.Println("  -o, --output <path>    Custom output destination for sliced video")
 	fmt.Println("  -u, --url <url>        Seminar announcement URL (extracts speaker, title, abstract)")
 	fmt.Println("  --meta-only            Fetch talk metadata from URL, save talk_meta.json, and exit")
 	fmt.Println("  --layout <type>        Preferred layout: slides (default), clean, speaker, gallery")
-	fmt.Println("  --no-ai                Skip AI LLM cut detection")
-	fmt.Println("  --re-detect            Force re-running AI cut detection even if talk_cuts.json exists")
+	fmt.Println("  --no-ai                Skip AI LLM cut and chapter detection")
+	fmt.Println("  --re-detect            Force re-running AI cut & chapter detection even if saved files exist")
 	fmt.Println("  --dry-run              Analyze and print cut plan without opening TUI")
 	fmt.Println("  --upload               Upload cut video to YouTube upon completion")
 	fmt.Println("  --channel <name>       Target YouTube channel (stores/loads ~/.config/auth/youtube_<channel>.json)")

@@ -17,6 +17,9 @@ func TestDefaultConfig(t *testing.T) {
 	if cfg.KeyFile != "~/.config/auth/openrouter_api_key" {
 		t.Errorf("expected default KeyFile ~/.config/auth/openrouter_api_key, got %q", cfg.KeyFile)
 	}
+	if cfg.DefaultPrivacy != "public" {
+		t.Errorf("expected default privacy public, got %q", cfg.DefaultPrivacy)
+	}
 }
 
 func TestResolvePath(t *testing.T) {

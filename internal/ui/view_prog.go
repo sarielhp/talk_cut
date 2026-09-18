@@ -11,6 +11,8 @@ import (
 	"github.com/charmbracelet/lipgloss"
 
 	"talk_cut/internal/cutter"
+	"talk_cut/internal/model"
+	"talk_cut/internal/vtt"
 )
 
 // ProgModel manages the FFmpeg video cutting progress and completion screen.
@@ -25,6 +27,11 @@ type ProgModel struct {
 	outputPath   string
 	chaptersPath string
 	vttPath      string
+	talkMeta     model.TalkMetadata
+	cuts         []model.CutInterval
+	stats        model.CutStats
+	inputVideo   string
+	isCutting    bool
 	width        int
 	height       int
 	statusMsg    string
@@ -69,6 +76,24 @@ func (m *ProgModel) SetOutputPaths(video, chapters, vtt string) {
 	m.outputPath = video
 	m.chaptersPath = chapters
 	m.vttPath = vtt
+}
+
+// SetPreflight updates the pre-flight export review information.
+func (m *ProgModel) SetPreflight(meta model.TalkMetadata, cuts []model.CutInterval, stats model.CutStats, inputVideo string) {
+	m.talkMeta = meta
+	m.cuts = cuts
+	m.stats = stats
+	m.inputVideo = inputVideo
+}
+
+// SetCutting marks whether rendering is actively underway.
+func (m *ProgModel) SetCutting(cutting bool) {
+	m.isCutting = cutting
+	if cutting {
+		m.stage = "starting"
+		m.detail = "Preparing FFmpeg cut pipeline..."
+		m.statusMsg = "Rendering video segments with FFmpeg..."
+	}
 }
 
 // SetProgress updates the progress state from cutter callbacks.
@@ -160,50 +185,100 @@ func (m ProgModel) View() string {
 
 // renderHeader renders the top title bar.
 func (m ProgModel) renderHeader() string {
-	title := m.theme.TitleStyle.Render(" talk_cut > RENDERING VIDEO ")
-	bar := lipgloss.NewStyle().Width(m.width).MarginBottom(2).Render(title)
-	return bar
+	return RenderTabBar(3, m.width, m.theme)
 }
 
 // renderBody renders the progress bar or completion summary.
 func (m ProgModel) renderBody() string {
-	var lines []string
-
 	if m.err != nil {
-		lines = append(lines, m.theme.DangerText.Bold(true).Render("✗ RENDERING FAILED"))
-		lines = append(lines, fmt.Sprintf("\nError: %v\n", m.err))
-		lines = append(lines, "Press [q] or [esc] to return.")
+		lines := []string{
+			m.theme.DangerText.Bold(true).Render("✗ RENDERING FAILED"),
+			fmt.Sprintf("\nError: %v\n", m.err),
+			"Press [q] or [esc] to return.",
+		}
 		box := m.theme.SidebarBox.Width(m.width - 4).Render(strings.Join(lines, "\n"))
 		return box
 	}
 
-	pctStr := fmt.Sprintf("%.0f%%", m.percent*100.0)
-	barLine := fmt.Sprintf("%s  %s", m.progBar.View(), m.theme.StatsValue.Render(pctStr))
-	lines = append(lines, barLine)
-	lines = append(lines, m.theme.SubtitleStyle.Render(m.detail))
-
 	if m.done {
-		lines = append(lines, "")
-		lines = append(lines, m.theme.SuccessText.Bold(true).Render("✔ SPLICING & EXPORT COMPLETE"))
-		lines = append(lines, fmt.Sprintf("Video:    %s", m.outputPath))
+		lines := []string{
+			m.theme.SuccessText.Bold(true).Render("✔ SPLICING & EXPORT COMPLETE"),
+			fmt.Sprintf("Video:    %s", m.outputPath),
+		}
 		if m.chaptersPath != "" {
 			lines = append(lines, fmt.Sprintf("Chapters: %s", m.chaptersPath))
 		}
 		if m.vttPath != "" {
 			lines = append(lines, fmt.Sprintf("Subtitles: %s", m.vttPath))
 		}
-		lines = append(lines, "")
-		lines = append(lines, "[p] Preview Cut Video in ffplay    [q] Exit talk_cut")
+		lines = append(lines, "", "[p] Preview Cut Video in ffplay    [q] Exit talk_cut")
+
+		content := strings.Join(lines, "\n")
+		box := m.theme.SidebarBox.Width(m.width - 4).Render(content)
+		return lipgloss.NewStyle().MarginLeft(2).Render(box)
+	}
+
+	if m.isCutting {
+		pctStr := fmt.Sprintf("%.0f%%", m.percent*100.0)
+		barLine := fmt.Sprintf("%s  %s", m.progBar.View(), m.theme.StatsValue.Render(pctStr))
+		lines := []string{
+			m.theme.TitleStyle.Render(" RENDERING IN PROGRESS "),
+			"",
+			barLine,
+			m.theme.SubtitleStyle.Render(m.detail),
+		}
+		content := strings.Join(lines, "\n")
+		box := m.theme.SidebarBox.Width(m.width - 4).Render(content)
+		return lipgloss.NewStyle().MarginLeft(2).Render(box)
+	}
+
+	return m.renderPreflightBox()
+}
+
+// renderPreflightBox formats the pre-render summary and launch call-to-action.
+func (m ProgModel) renderPreflightBox() string {
+	boxWidth := m.width - 4
+	if boxWidth < 20 {
+		boxWidth = 20
+	}
+
+	title := m.theme.TitleStyle.Render(" PRE-FLIGHT EXPORT REVIEW ")
+	privacy := strings.ToUpper(m.talkMeta.Privacy)
+	if privacy == "" {
+		privacy = "PUBLIC"
+	}
+
+	lines := []string{
+		title,
+		"",
+		fmt.Sprintf("Title:        %s", m.talkMeta.Title),
+		fmt.Sprintf("Speaker:      %s", m.talkMeta.Speaker),
+		fmt.Sprintf("Privacy:      %s", privacy),
+		fmt.Sprintf("Input Video:  %s", m.inputVideo),
+		fmt.Sprintf("Output Video: %s", m.outputPath),
+		"",
+		fmt.Sprintf("Original Duration: %s", vtt.FormatTimestampShort(m.stats.TotalOriginal)),
+		fmt.Sprintf("Kept Duration:     %s (%d cut regions removed, %s excised)",
+			vtt.FormatTimestampShort(m.stats.TotalKept),
+			m.stats.CutCount,
+			vtt.FormatTimestampShort(m.stats.TotalCut),
+		),
+		fmt.Sprintf("YouTube Chapters:  %d chapter markers defined", len(m.talkMeta.Chapters)),
+		"",
+		lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("#FFFFFF")).Background(lipgloss.Color("#10B981")).Padding(0, 2).Render(" Press [c] or [Enter] to Start Video Rendering "),
 	}
 
 	content := strings.Join(lines, "\n")
-	box := m.theme.SidebarBox.Width(m.width - 4).Render(content)
+	box := m.theme.SidebarBox.Width(boxWidth).Render(content)
 	return lipgloss.NewStyle().MarginLeft(2).Render(box)
 }
 
 // renderFooter renders the bottom status bar.
 func (m ProgModel) renderFooter() string {
 	msg := m.statusMsg
+	if !m.isCutting && !m.done && m.err == nil {
+		msg = "Enter / c: start rendering | ←/→: switch tabs | Esc: cuts review"
+	}
 	bar := m.theme.HelpDesc.Render(" " + msg)
-	return lipgloss.NewStyle().Width(m.width).MarginTop(2).Render(bar)
+	return lipgloss.NewStyle().Width(m.width).MarginTop(1).Render(bar)
 }

@@ -89,6 +89,14 @@ class TUISnapshotTester
     assert_contains(snap, "CUT REGIONS (1)", "Cut regions count updated dynamically to 1")
     assert_top_and_bottom_invariants(snap, "cue 2 marked cut")
 
+    # Step 3b: Verify highlighted cue row spans full width with continuous dark green background (#064E3B)
+    log_step("Verify highlighted cue row spans full width with continuous dark green background")
+    ansi_snap = read_pane_ansi
+    highlight_line = ansi_snap.lines.find { |l| l.include?("▶") }
+    assert(!highlight_line.nil?, "Highlighted cue line found on first screen")
+    assert(highlight_line.include?("48;2;6;78;59m"), "Highlighted cue line has dark green background (#064E3B)")
+    assert(!highlight_line.include?("\e[0m  Great!"), "Text within highlighted cue row is not cleared to default background")
+
     # Step 4: Explicit save command (s) and disk persistence
     log_step("Test explicit save with 's' and verify talk_cuts.json serialization")
     send_key("s")
@@ -119,36 +127,196 @@ class TUISnapshotTester
       log_step("Full 540-cue scroll test skipped (only run on full gate or when explicitly requested)")
     end
 
-    # Step 7: Switch to Metadata & Chapters view (Tab)
-    log_step("Switch to Metadata & Chapters view with [Tab]")
+    # Step 6b: Test Tab navigation on Tab 1 jumps to next chapter header
+    log_step("Test Tab navigation on Tab 1 jumps to next chapter header")
     send_key("Tab")
+    snap = wait_for_pattern("Cue 9/540", "Tab jumped to Chapter 2 at Cue 9 (00:39)")
+    assert_contains(snap, "Cue 9/540", "Cursor jumped to Cue 9 at start of Chapter 2")
+    assert_contains(snap, "Karim Abu Affash", "Cue card shows speaker for Chapter 2")
+
+    send_key("Tab")
+    snap = wait_for_pattern("Cue 12/540", "Tab jumped to Chapter 3 at Cue 12 (01:02)")
+    assert_contains(snap, "Cue 12/540", "Cursor jumped to Cue 12 at start of Chapter 3")
+
+    send_key("BTab")
+    snap = wait_for_pattern("Cue 9/540", "Shift+Tab (BTab) jumped back to Chapter 2 at Cue 9")
+    assert_contains(snap, "Cue 9/540", "Cursor returned to Chapter 2")
+
+    # Step 7: Switch to Metadata view via direct numeric key '2'
+    log_step("Switch to Metadata view with direct key '2'")
+    send_key("2")
     snap = wait_for_pattern("TALK & EXPORT CONFIGURATION", "Metadata view active")
     capture_snapshot("06_metadata_view", snap)
     assert_contains(snap, "TALK & EXPORT CONFIGURATION", "Metadata input card header")
     assert_contains(snap, "YOUTUBE CHAPTERS PREVIEW", "YouTube chapters preview pane")
     assert_contains(snap, "UPLOAD PREVIEW", "Upload configuration preview pane")
 
-    # Step 8: Return to Cut Review view (Escape)
+    # Step 8: Verify editable field on Metadata view has pale yellow background (#FEF9C3)
+    log_step("Verify active editable field has very pale yellow background (#FEF9C3)")
+    ansi_snap = read_pane_ansi
+    assert(ansi_snap.include?("48;2;254;249;195m"), "Active field on Metadata screen has pale yellow background")
+
+    # Step 8b: Live test for editing URL field on Tab 2 with regular arrow keys
+    log_step("Live test for editing URL field on Tab 2 with regular arrow keys")
+    3.times { send_key("Tab"); sleep 0.05 }
+    wait_until { read_pane_ansi.include?("48;2;254;249;195m") }
+    ansi_snap = read_pane_ansi
+    assert(ansi_snap.include?("48;2;254;249;195m"), "URL field has pale yellow background when focused")
+
+    # Enter edit mode
+    send_key("Enter")
+    snap = wait_for_pattern("Editing field", "Entered edit mode for URL field")
+
+    # Insert letters
+    send_key("-l \"abc\"")
+    sleep 0.05
+
+    # Move left using regular arrow key
+    send_key("Left")
+    send_key("Left")
+    snap = read_pane
+    assert_contains(snap, "[2] Metadata", "Regular Left arrow moved cursor without switching tabs")
+
+    # Insert letter at cursor
+    send_key("-l \"X\"")
+    sleep 0.05
+
+    # Move right using regular arrow key
+    send_key("Right")
+    send_key("Right")
+    snap = read_pane
+    assert_contains(snap, "[2] Metadata", "Regular Right arrow moved cursor without switching tabs")
+
+    # Verify modified text in URL field contains edited characters
+    assert_contains(snap, "aXbc", "URL field contains inserted letters with left/right cursor navigation")
+
+    # Commit edit
+    send_key("Enter")
+    snap = wait_for_pattern("Alt+←/→: tabs", "Committed edit on URL field")
+
+    # Return to Cuts view with [Esc]
     log_step("Return to Cuts view with [Esc]")
     send_key("Escape")
     snap = wait_for_pattern("TRANSCRIPT", "Returned to Cut Review screen")
     capture_snapshot("07_return_cuts_view", snap)
-    assert_contains(snap, "✂  Great!", "Cue #2 state preserved after round-trip")
     assert_top_and_bottom_invariants(snap, "return from metadata view")
 
-    # Step 9: Responsive terminal resizing (SIGWINCH)
+    # Step 9: Alt+Left / Alt+Right pane navigation cycling through all 4 screens
+    log_step("Test Alt+arrow pane navigation cycling across all 4 screens")
+    # Tab 1 -> Tab 2
+    send_key("M-Right")
+    snap = wait_for_pattern("TALK & EXPORT CONFIGURATION", "Alt+Right from Tab 1 to Tab 2")
+    assert_contains(snap, "TALK & EXPORT CONFIGURATION", "Tab 2 reached via Alt+Right")
+
+    # Tab 2 -> Tab 3
+    send_key("M-Right")
+    snap = wait_for_pattern("SPEECH CONTEXT AT", "Alt+Right from Tab 2 to Tab 3")
+    assert_contains(snap, "SPEECH CONTEXT AT", "Tab 3 reached via Alt+Right")
+    assert_contains(snap, "Introduction", "Chapters listed on Tab 3")
+    assert_contains(snap, "▶  1. [00:39 -> 00:00]", "First chapter highlighted on single non-wrapping line")
+
+    # Test down arrow on Tab 3: cursor shifts cleanly to chapter 2 on a single line
+    send_key("Down")
+    snap = wait_for_pattern("▶  2. [01:02 ->", "Tab 3 Down arrow moved highlight to Chapter 2")
+    assert_contains(snap, "▶  2. [01:02 ->", "Second chapter highlighted on single non-wrapping line")
+    assert_contains(snap, "SPEECH CONTEXT AT 01:02", "Speech context snippet updated to Chapter 2 (01:02)")
+
+    # Up arrow returns to Chapter 1
+    send_key("Up")
+    snap = wait_for_pattern("▶  1. [00:39 -> 00:00]", "Tab 3 Up arrow returned to Chapter 1")
+    assert_contains(snap, "SPEECH CONTEXT AT 00:39", "Speech context snippet restored to 00:39")
+
+    # Tab 3 -> Tab 4
+    send_key("M-Right")
+    snap = wait_for_pattern("PRE-FLIGHT EXPORT REVIEW", "Alt+Right from Tab 3 to Tab 4")
+    assert_contains(snap, "PRE-FLIGHT EXPORT REVIEW", "Tab 4 reached via Alt+Right")
+
+    # Tab 4 -> Tab 1 (cyclic wrap-around)
+    send_key("M-Right")
+    snap = wait_for_pattern("TRANSCRIPT (540 cues)", "Alt+Right wrap-around to Tab 1")
+    assert_contains(snap, "TRANSCRIPT (540 cues)", "Tab 1 reached via Alt+Right wrap-around")
+    assert_top_and_bottom_invariants(snap, "Tab 1 after cyclic right navigation")
+
+    # Test reverse direction with Alt+Left: Tab 1 -> Tab 4 (cyclic backwards)
+    send_key("M-Left")
+    snap = wait_for_pattern("PRE-FLIGHT EXPORT REVIEW", "Alt+Left wrap-around to Tab 4")
+    assert_contains(snap, "PRE-FLIGHT EXPORT REVIEW", "Tab 4 reached via Alt+Left wrap-around")
+
+    # Tab 4 -> Tab 3
+    send_key("M-Left")
+    snap = wait_for_pattern("SPEECH CONTEXT AT", "Alt+Left to Tab 3")
+    assert_contains(snap, "SPEECH CONTEXT AT", "Tab 3 reached via Alt+Left")
+
+    # Tab 3 -> Tab 2
+    send_key("M-Left")
+    snap = wait_for_pattern("TALK & EXPORT CONFIGURATION", "Alt+Left to Tab 2")
+    assert_contains(snap, "TALK & EXPORT CONFIGURATION", "Tab 2 reached via Alt+Left")
+
+    # Tab 2 -> Tab 1
+    send_key("M-Left")
+    snap = wait_for_pattern("TRANSCRIPT (540 cues)", "Alt+Left to Tab 1")
+    assert_contains(snap, "TRANSCRIPT (540 cues)", "Tab 1 reached via Alt+Left")
+    assert_top_and_bottom_invariants(snap, "Tab 1 after cyclic left navigation")
+
+    # Step 10: Direct numeric jumps (1..4)
+    log_step("Test direct numeric jumps (1, 2, 3, 4)")
+    send_key("3")
+    snap = wait_for_pattern("SPEECH CONTEXT AT", "Numeric key '3' jumps to Tab 3")
+    assert_contains(snap, "SPEECH CONTEXT AT", "Tab 3 reached via '3'")
+
+    send_key("4")
+    snap = wait_for_pattern("PRE-FLIGHT EXPORT REVIEW", "Numeric key '4' jumps to Tab 4")
+    assert_contains(snap, "PRE-FLIGHT EXPORT REVIEW", "Tab 4 reached via '4'")
+
+    send_key("2")
+    snap = wait_for_pattern("TALK & EXPORT CONFIGURATION", "Numeric key '2' jumps to Tab 2")
+    assert_contains(snap, "TALK & EXPORT CONFIGURATION", "Tab 2 reached via '2'")
+
+    send_key("1")
+    snap = wait_for_pattern("TRANSCRIPT (540 cues)", "Numeric key '1' jumps to Tab 1")
+    assert_contains(snap, "TRANSCRIPT (540 cues)", "Tab 1 reached via '1'")
+    assert_top_and_bottom_invariants(snap, "Tab 1 after direct numeric jumps")
+
+    # Step 11: Verify chapter starts move automatically to first non-deleted cue
+    log_step("Verify chapter starts move to first cue that is not deleted")
+    send_key("Tab")
+    snap = wait_for_pattern("Cue 12/540", "Cursor at Cue 12 (01:02)")
+    assert_contains(snap, "── 🔖 Definitions and Related Work (01:02)", "Chapter initially starts at Cue 12 (01:02)")
+
+    # Mark Cue 12 as CUT (Space). Chapter relocates to next kept cue #13 (01:09)!
+    send_key("Space")
+    snap = wait_for_pattern("── 🔖 Definitions and Related Work (01:09)", "Chapter moves to first kept cue #13 (01:09)")
+    assert_contains(snap, "── 🔖 Definitions and Related Work (01:09)", "Chapter banner relocated to first kept cue at 01:09")
+
+    # Step 12: Verify dedicated injected chapter header line in transcript
+    log_step("Verify injected chapter header line in transcript")
+    assert_contains(snap, "── 🔖 Definitions and Related Work", "Dedicated chapter header banner in transcript")
+    banner_count = snap.scan(/── 🔖 Definitions and Related Work \(01:09\)/).size
+    if banner_count == 1
+      puts "  \e[32m✔\e[0m Chapter title appears exactly once as dedicated banner in transcript (count: #{banner_count})"
+    else
+      puts "\n\e[31m✗ Duplicate Chapter Detected: expected 1, found #{banner_count}\e[0m"
+      exit 1
+    end
+
+    # Toggle Cue 12 back to KEEP (Space): restores cut regions to 1
+    send_key("Space")
+    snap = wait_for_pattern("CUT REGIONS (1)", "Cue 12 un-cut back to KEEP")
+    assert_contains(snap, "CUT REGIONS (1)", "Cut regions count restored to 1")
+
+    # Step 11: Responsive terminal resizing (SIGWINCH)
     if @test_resizing
       log_step("Test responsive resizing: Compact VT100 (80x24) and Widescreen (130x35)")
       test_terminal_resizing!
     end
 
-    # Step 10: Clean process shutdown (q)
+    # Step 12: Clean process shutdown (q)
     log_step("Clean process shutdown with 'q'")
     send_key("q")
     wait_until(timeout: 2.0) { !session_alive? }
     assert_session_closed
 
-    # Step 11: Relaunch and verify automatic reloading of cuts
+    # Step 13: Relaunch and verify automatic reloading of cuts
     log_step("Re-launch talk_cut to verify clean reload of talk_cuts.json")
     launch_app!
     snap = wait_for_pattern("TRANSCRIPT", "reload of talk_cut")
@@ -188,7 +356,11 @@ class TUISnapshotTester
     Dir.glob("#{example_dir}/*").each do |file|
       # Exclude pre-existing cuts file so test operates on a fresh clean recording
       next if File.basename(file) == 'talk_cuts.json'
-      FileUtils.ln_sf(file, File.join(@tmp_dir, File.basename(file)))
+      if File.basename(file) == 'talk_meta.json'
+        FileUtils.cp(file, File.join(@tmp_dir, File.basename(file)))
+      else
+        FileUtils.ln_sf(file, File.join(@tmp_dir, File.basename(file)))
+      end
     end
   end
 
@@ -211,6 +383,12 @@ class TUISnapshotTester
 
   def read_pane
     cmd = "tmux capture-pane -t #{@session_name} -p"
+    stdout, _, status = Open3.capture3(cmd)
+    status.success? ? stdout : ''
+  end
+
+  def read_pane_ansi
+    cmd = "tmux capture-pane -t #{@session_name} -p -e"
     stdout, _, status = Open3.capture3(cmd)
     status.success? ? stdout : ''
   end
@@ -269,6 +447,16 @@ class TUISnapshotTester
     end
     puts "\e[1;36m└#{separator}┘\e[0m\n"
   end
+
+  def assert_true(condition, msg)
+    if condition
+      puts "  \e[32m✔\e[0m #{msg}"
+    else
+      puts "\n\e[31m✗ Assertion Failed: #{msg}\e[0m"
+      exit 1
+    end
+  end
+  alias assert assert_true
 
   def assert_contains(screen, pattern, msg)
     if screen.include?(pattern)

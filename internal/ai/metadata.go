@@ -65,7 +65,7 @@ func ExtractTalkMetadata(ctx context.Context, client *Client, pageText string, c
 		Affiliation: raw.Affiliation,
 		Abstract:    raw.Abstract,
 		Tags:        raw.Tags,
-		Privacy:     "unlisted",
+		Privacy:     "public",
 	}
 
 	for _, ch := range raw.SuggestedChapters {

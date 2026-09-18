@@ -7,10 +7,13 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
 
+	"talk_cut/internal/ai"
 	"talk_cut/internal/bundle"
+	"talk_cut/internal/config"
 	"talk_cut/internal/cutter"
 	"talk_cut/internal/model"
 	"talk_cut/internal/vtt"
@@ -22,9 +25,11 @@ type Screen int
 const (
 	// ScreenCuts displays the interactive cut review and transcript.
 	ScreenCuts Screen = iota
-	// ScreenMeta displays metadata review, tags, and chapter timing.
+	// ScreenMeta displays metadata review, tags, and talk settings.
 	ScreenMeta
-	// ScreenProg displays the FFmpeg cutting progress and final export.
+	// ScreenChapters displays YouTube chapter markers manager.
+	ScreenChapters
+	// ScreenProg displays pre-flight export summary, FFmpeg cutting progress, and final review.
 	ScreenProg
 )
 
@@ -37,19 +42,25 @@ type cutDoneMsg struct {
 	vttPath      string
 }
 
+type aiChaptersMsg struct {
+	chapters []model.ChapterMarker
+	err      error
+}
+
 // AppModel is the root Bubble Tea application model.
 type AppModel struct {
-	screen    Screen
-	cutsView  CutsModel
-	metaView  MetaModel
-	progView  ProgModel
-	bundle    bundle.RecordingBundle
-	media     cutter.MediaInfo
-	progChan  chan cutter.CutProgress
-	doneChan  chan cutDoneMsg
-	width     int
-	height    int
-	isCutting bool
+	screen       Screen
+	cutsView     CutsModel
+	metaView     MetaModel
+	chaptersView ChaptersModel
+	progView     ProgModel
+	bundle       bundle.RecordingBundle
+	media        cutter.MediaInfo
+	progChan     chan cutter.CutProgress
+	doneChan     chan cutDoneMsg
+	width        int
+	height       int
+	isCutting    bool
 }
 
 // NewAppModel creates an initialized AppModel.
@@ -60,19 +71,30 @@ func NewAppModel(
 	meta model.TalkMetadata,
 	defaultOutput string,
 ) AppModel {
+	meta.Chapters = cutter.SnapChaptersToCues(meta.Chapters, cues)
 	cuts := model.BuildCutIntervals(cues)
+	cutsView := NewCutsModel(cues, media, b.PrimaryVideo, b.Dir)
+	cutsView.SetChapters(meta.Chapters)
+
+	metaView := NewMetaModel(meta, cuts, defaultOutput)
+	chaptersView := NewChaptersModel(meta.Chapters, cuts, cues, b.PrimaryVideo)
+	progView := NewProgModel(defaultOutput)
+	stats := model.ComputeStats(cues, media.Duration)
+	progView.SetPreflight(meta, cuts, stats, b.PrimaryVideo)
+
 	return AppModel{
-		screen:    ScreenCuts,
-		cutsView:  NewCutsModel(cues, media, b.PrimaryVideo, b.Dir),
-		metaView:  NewMetaModel(meta, cuts, defaultOutput),
-		progView:  NewProgModel(defaultOutput),
-		bundle:    b,
-		media:     media,
-		progChan:  make(chan cutter.CutProgress, 32),
-		doneChan:  make(chan cutDoneMsg, 1),
-		width:     100,
-		height:    30,
-		isCutting: false,
+		screen:       ScreenCuts,
+		cutsView:     cutsView,
+		metaView:     metaView,
+		chaptersView: chaptersView,
+		progView:     progView,
+		bundle:       b,
+		media:        media,
+		progChan:     make(chan cutter.CutProgress, 32),
+		doneChan:     make(chan cutDoneMsg, 1),
+		width:        100,
+		height:       30,
+		isCutting:    false,
 	}
 }
 
@@ -97,6 +119,8 @@ func (a AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			a.progView.SetOutputPaths(msg.videoPath, msg.chaptersPath, msg.vttPath)
 		}
 		return a, nil
+	case aiChaptersMsg:
+		return a.handleAIChaptersMsg(msg)
 	case tea.KeyMsg:
 		return a.handleKey(msg)
 	}
@@ -110,14 +134,75 @@ func (a *AppModel) handleWindowSize(msg tea.WindowSizeMsg) {
 	a.height = msg.Height
 	a.cutsView.SetDimensions(msg.Width, msg.Height)
 	a.metaView.SetDimensions(msg.Width, msg.Height)
+	a.chaptersView.SetDimensions(msg.Width, msg.Height)
 	a.progView.SetDimensions(msg.Width, msg.Height)
 }
 
-// handleKey routes key inputs based on current screen.
+// isEditingText returns whether an active text input currently has focus.
+func (a AppModel) isEditingText() bool {
+	if a.screen == ScreenMeta && a.metaView.IsEditing() {
+		return true
+	}
+	if a.screen == ScreenChapters && a.chaptersView.IsEditing() {
+		return true
+	}
+	return false
+}
+
+// switchTab navigates to a new tab while synchronizing cuts, chapters, and metadata.
+func (a *AppModel) switchTab(target Screen) {
+	if a.screen == target {
+		return
+	}
+
+	cues := a.cutsView.Cues()
+	cuts := model.BuildCutIntervals(cues)
+
+	switch a.screen {
+	case ScreenCuts:
+		a.metaView.UpdateCuts(cuts)
+		a.chaptersView.UpdateCuts(cuts)
+		a.chaptersView.SetCues(cues)
+		if len(a.cutsView.Chapters()) > 0 {
+			aligned := cutter.AlignChaptersToKeptCues(a.cutsView.Chapters(), cues)
+			a.cutsView.SetChapters(aligned)
+			a.chaptersView.SetChapters(aligned)
+			a.metaView.SetChapters(aligned)
+		}
+	case ScreenMeta:
+		meta := a.metaView.Metadata()
+		_ = model.SaveMetaFile(a.bundle.Dir, meta)
+		a.cutsView.SetChapters(meta.Chapters)
+		a.chaptersView.SetChapters(meta.Chapters)
+	case ScreenChapters:
+		chapters := a.chaptersView.Chapters()
+		a.cutsView.SetChapters(chapters)
+		a.metaView.SetChapters(chapters)
+		meta := a.metaView.Metadata()
+		meta.Chapters = chapters
+		_ = model.SaveMetaFile(a.bundle.Dir, meta)
+	}
+
+	if target == ScreenProg {
+		stats := model.ComputeStats(cues, a.media.Duration)
+		meta := a.metaView.Metadata()
+		aligned := cutter.AlignChaptersToKeptCues(meta.Chapters, cues)
+		meta.Chapters = cutter.AdjustChapters(aligned, cuts, "Introduction")
+		a.progView.SetPreflight(meta, cuts, stats, a.bundle.PrimaryVideo)
+	}
+
+	a.screen = target
+}
+
+// handleKey routes key inputs based on current screen and global navigation.
 func (a AppModel) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	if msg.String() == "ctrl+c" {
 		a.cutsView.Close()
 		return a, tea.Quit
+	}
+
+	if a.handleGlobalNav(msg) {
+		return a, nil
 	}
 
 	switch a.screen {
@@ -125,11 +210,45 @@ func (a AppModel) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return a.handleCutsKey(msg)
 	case ScreenMeta:
 		return a.handleMetaKey(msg)
+	case ScreenChapters:
+		return a.handleChaptersKey(msg)
 	case ScreenProg:
 		return a.handleProgKey(msg)
 	}
 
 	return a, nil
+}
+
+// handleGlobalNav routes Alt+arrows and numeric tab switching across all views.
+func (a *AppModel) handleGlobalNav(msg tea.KeyMsg) bool {
+	if msg.String() == "alt+left" || (msg.Alt && msg.Type == tea.KeyLeft) {
+		prev := (int(a.screen) - 1 + 4) % 4
+		a.switchTab(Screen(prev))
+		return true
+	}
+	if msg.String() == "alt+right" || (msg.Alt && msg.Type == tea.KeyRight) {
+		next := (int(a.screen) + 1) % 4
+		a.switchTab(Screen(next))
+		return true
+	}
+
+	if !a.isEditingText() {
+		switch msg.String() {
+		case "1":
+			a.switchTab(ScreenCuts)
+			return true
+		case "2":
+			a.switchTab(ScreenMeta)
+			return true
+		case "3":
+			a.switchTab(ScreenChapters)
+			return true
+		case "4":
+			a.switchTab(ScreenProg)
+			return true
+		}
+	}
+	return false
 }
 
 // handleCutsKey processes keys on the cut review screen.
@@ -138,11 +257,17 @@ func (a AppModel) handleCutsKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "q":
 		a.cutsView.Close()
 		return a, tea.Quit
-	case "tab", "enter":
-		intervals := model.BuildCutIntervals(a.cutsView.Cues())
-		a.metaView.UpdateCuts(intervals)
-		a.screen = ScreenMeta
+	case "tab", "]":
+		a.cutsView.JumpChapter(1)
 		return a, nil
+	case "shift+tab", "[":
+		a.cutsView.JumpChapter(-1)
+		return a, nil
+	case "ctrl+r", "c":
+		a.switchTab(ScreenProg)
+		return a.startRender()
+	case "r", "ctrl+a":
+		return a, a.triggerAIChapters()
 	}
 
 	var cmd tea.Cmd
@@ -152,18 +277,21 @@ func (a AppModel) handleCutsKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 // handleMetaKey processes keys on the metadata editor screen.
 func (a AppModel) handleMetaKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
-	switch msg.String() {
-	case "esc":
-		_ = model.SaveMetaFile(a.bundle.Dir, a.metaView.Metadata())
-		a.screen = ScreenCuts
-		return a, nil
-	case "ctrl+r":
-		_ = model.SaveMetaFile(a.bundle.Dir, a.metaView.Metadata())
-		return a.startRender()
-	case "enter":
-		if a.metaView.focusIndex == fieldCommit {
-			_ = model.SaveMetaFile(a.bundle.Dir, a.metaView.Metadata())
+	if !a.metaView.IsEditing() {
+		switch msg.String() {
+		case "esc":
+			a.switchTab(ScreenCuts)
+			return a, nil
+		case "ctrl+r", "c":
+			a.switchTab(ScreenProg)
 			return a.startRender()
+		case "ctrl+a", "r":
+			return a, a.triggerAIChapters()
+		case "enter":
+			if a.metaView.focusIndex == fieldCommit {
+				a.switchTab(ScreenProg)
+				return a.startRender()
+			}
 		}
 	}
 
@@ -172,16 +300,108 @@ func (a AppModel) handleMetaKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	return a, cmd
 }
 
-// handleProgKey processes keys on the progress screen.
+// handleChaptersKey processes keys on the chapters manager screen.
+func (a AppModel) handleChaptersKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	if !a.chaptersView.IsEditing() {
+		switch msg.String() {
+		case "esc":
+			a.switchTab(ScreenCuts)
+			return a, nil
+		case "r", "ctrl+a":
+			return a, a.triggerAIChapters()
+		case "ctrl+r", "c":
+			a.switchTab(ScreenProg)
+			return a.startRender()
+		}
+	}
+
+	var cmd tea.Cmd
+	a.chaptersView, cmd = a.chaptersView.Update(msg)
+	return a, cmd
+}
+
+// handleProgKey processes keys on the progress and pre-flight screen.
 func (a AppModel) handleProgKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	if a.progView.IsDone() && (msg.String() == "q" || msg.String() == "esc") {
 		a.cutsView.Close()
 		return a, tea.Quit
 	}
 
+	if !a.isCutting {
+		switch msg.String() {
+		case "esc":
+			a.switchTab(ScreenCuts)
+			return a, nil
+		case "c", "enter":
+			return a.startRender()
+		case "q":
+			a.cutsView.Close()
+			return a, tea.Quit
+		}
+	}
+
 	var cmd tea.Cmd
 	a.progView, cmd = a.progView.Update(msg)
 	return a, cmd
+}
+
+// handleAIChaptersMsg processes the asynchronous AI chapter detection result.
+func (a *AppModel) handleAIChaptersMsg(msg aiChaptersMsg) (tea.Model, tea.Cmd) {
+	if msg.err != nil {
+		errStr := fmt.Sprintf("AI chapter error: %v", msg.err)
+		a.cutsView.SetFeedback(errStr, true)
+		a.metaView.SetFeedback(errStr, true)
+		return *a, clearStatusCmd()
+	}
+
+	snapped := cutter.SnapChaptersToCues(msg.chapters, a.cutsView.Cues())
+	a.metaView.SetChapters(snapped)
+	a.cutsView.SetChapters(snapped)
+	a.chaptersView.SetChapters(snapped)
+
+	meta := a.metaView.Metadata()
+	meta.Chapters = snapped
+	_ = model.SaveMetaFile(a.bundle.Dir, meta)
+
+	feedback := fmt.Sprintf("AI generated %d natural chapters", len(msg.chapters))
+	a.cutsView.SetFeedback(feedback, false)
+	a.metaView.SetFeedback(feedback, false)
+	return *a, clearStatusCmd()
+}
+
+// triggerAIChapters dispatches a background task to analyze kept cues for chapters.
+func (a *AppModel) triggerAIChapters() tea.Cmd {
+	var kept []model.SubtitleCue
+	for _, c := range a.cutsView.Cues() {
+		if c.Action != model.ActionCut {
+			kept = append(kept, c)
+		}
+	}
+	if len(kept) == 0 {
+		a.cutsView.SetFeedback("Cannot generate chapters: all cues cut", true)
+		a.metaView.SetFeedback("Cannot generate chapters: all cues cut", true)
+		return clearStatusCmd()
+	}
+
+	a.cutsView.SetFeedback("Analyzing kept speech for natural chapters...", false)
+	a.metaView.SetFeedback("Analyzing kept speech for natural chapters...", false)
+
+	meta := a.metaView.Metadata()
+	return func() tea.Msg {
+		cfg, err := config.LoadConfig()
+		if err != nil {
+			return aiChaptersMsg{err: err}
+		}
+		client, err := ai.NewClient(cfg)
+		if err != nil {
+			return aiChaptersMsg{err: err}
+		}
+		ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+		defer cancel()
+
+		chapters, err := ai.DetectChapters(ctx, client, kept, meta.Title, meta.Abstract)
+		return aiChaptersMsg{chapters: chapters, err: err}
+	}
 }
 
 // startRender switches to progress view and fires the background cut pipeline.
@@ -191,6 +411,7 @@ func (a AppModel) startRender() (tea.Model, tea.Cmd) {
 	}
 	a.cutsView.Close()
 	a.isCutting = true
+	a.progView.SetCutting(true)
 	a.screen = ScreenProg
 	return a, a.startCuttingPipeline()
 }
@@ -203,6 +424,8 @@ func (a AppModel) forwardToActiveView(msg tea.Msg) (tea.Model, tea.Cmd) {
 		a.cutsView, cmd = a.cutsView.Update(msg)
 	case ScreenMeta:
 		a.metaView, cmd = a.metaView.Update(msg)
+	case ScreenChapters:
+		a.chaptersView, cmd = a.chaptersView.Update(msg)
 	case ScreenProg:
 		a.progView, cmd = a.progView.Update(msg)
 	}
@@ -216,6 +439,8 @@ func (a AppModel) View() string {
 		return a.cutsView.View()
 	case ScreenMeta:
 		return a.metaView.View()
+	case ScreenChapters:
+		return a.chaptersView.View()
 	case ScreenProg:
 		return a.progView.View()
 	}
@@ -283,7 +508,12 @@ func runCutWorker(
 	chaptersPath := outBase + "_chapters.txt"
 	vttPath := outBase + ".vtt"
 
-	writeChaptersFile(chaptersPath, meta.Chapters, cuts)
+	aligned := cutter.AlignChaptersToKeptCues(meta.Chapters, cues)
+	normalized := cutter.AdjustChapters(aligned, cuts, "Introduction")
+	meta.Chapters = normalized
+	_ = model.SaveMetaFile(filepath.Dir(outVideo), meta)
+
+	writeChaptersFile(chaptersPath, normalized)
 	writeAdjustedVTT(vttPath, cues, cuts)
 
 	doneChan <- cutDoneMsg{
@@ -294,15 +524,14 @@ func runCutWorker(
 }
 
 // writeChaptersFile writes adjusted YouTube chapters to disk.
-func writeChaptersFile(path string, rawChapters []model.ChapterMarker, cuts []model.CutInterval) {
-	adj := cutter.AdjustChapters(rawChapters, cuts, "Introduction")
+func writeChaptersFile(path string, chapters []model.ChapterMarker) {
 	f, err := os.Create(path)
 	if err != nil {
 		return
 	}
 	defer f.Close()
 
-	for _, ch := range adj {
+	for _, ch := range chapters {
 		fmt.Fprintln(f, ch.FormatYouTubeLine())
 	}
 }

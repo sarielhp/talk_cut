@@ -64,6 +64,11 @@ func DiscoverBundle(dir string, preferredLayout string) (*RecordingBundle, error
 func classifyFile(b *RecordingBundle, name, fullPath string) {
 	lower := strings.ToLower(name)
 
+	// Ignore output artifacts from previous cutting runs
+	if strings.HasSuffix(lower, "_cut.mp4") || strings.HasSuffix(lower, "_cut.mkv") || strings.HasSuffix(lower, "_cut.vtt") {
+		return
+	}
+
 	if strings.HasSuffix(lower, ".vtt") {
 		// Prefer files containing ".transcript.vtt" if multiple exist
 		if b.TranscriptPath == "" || strings.Contains(lower, "transcript") {

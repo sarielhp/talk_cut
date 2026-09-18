@@ -4,6 +4,7 @@ package ui
 import (
 	"fmt"
 	"os/exec"
+	"sort"
 	"strings"
 	"time"
 
@@ -33,6 +34,7 @@ type CutsModel struct {
 	theme        Theme
 	keys         KeyMap
 	cues         []model.SubtitleCue
+	chapters     []model.ChapterMarker
 	media        cutter.MediaInfo
 	videoPath    string
 	recordingDir string
@@ -60,7 +62,7 @@ func NewCutsModel(cues []model.SubtitleCue, media cutter.MediaInfo, videoPath, r
 		cursor:       0,
 		width:        100,
 		height:       30,
-		statusMsg:    "j/k: navigate | Space: toggle cut | p: preview ffplay | Tab: metadata",
+		statusMsg:    "j/k: nav | Space: cut/keep | Tab: chapter | c: commit | p: preview | F1: help",
 	}
 }
 
@@ -81,6 +83,84 @@ func (m *CutsModel) SetDimensions(w, h int) {
 	m.width = w
 	m.height = h
 	m.adjustScroll()
+}
+
+// SetChapters updates the chapter marker list for inline transcript annotations.
+func (m *CutsModel) SetChapters(chapters []model.ChapterMarker) {
+	m.chapters = cutter.SnapChaptersToCues(chapters, m.cues)
+}
+
+// Chapters returns the active chapter markers.
+func (m CutsModel) Chapters() []model.ChapterMarker {
+	return m.chapters
+}
+
+// isChapterStart checks if a cue is the start of a chapter marker.
+func (m CutsModel) isChapterStart(cue model.SubtitleCue) (bool, model.ChapterMarker) {
+	for _, ch := range m.chapters {
+		if cue.Start == ch.OriginalTime {
+			return true, ch
+		}
+	}
+	return false, model.ChapterMarker{}
+}
+
+// JumpChapter moves cursor to the next or previous cue that starts a chapter.
+func (m *CutsModel) JumpChapter(direction int) bool {
+	if len(m.cues) == 0 || len(m.chapters) == 0 {
+		return false
+	}
+	idx := m.cursor + direction
+	for idx >= 0 && idx < len(m.cues) {
+		if ok, _ := m.isChapterStart(m.cues[idx]); ok {
+			m.setCursor(idx)
+			return true
+		}
+		idx += direction
+	}
+	// Wrap around
+	if direction > 0 {
+		for i := 0; i < m.cursor; i++ {
+			if ok, _ := m.isChapterStart(m.cues[i]); ok {
+				m.setCursor(i)
+				return true
+			}
+		}
+	} else {
+		for i := len(m.cues) - 1; i > m.cursor; i-- {
+			if ok, _ := m.isChapterStart(m.cues[i]); ok {
+				m.setCursor(i)
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// toggleChapterOnCurrent adds or removes a chapter marker at the focused cue.
+func (m *CutsModel) toggleChapterOnCurrent() {
+	if len(m.cues) == 0 || m.cursor < 0 || m.cursor >= len(m.cues) {
+		return
+	}
+	cue := m.cues[m.cursor]
+	for i, ch := range m.chapters {
+		if ok, _ := m.isChapterStart(cue); ok && ch.OriginalTime == cue.Start {
+			m.chapters = append(m.chapters[:i], m.chapters[i+1:]...)
+			m.SetFeedback(fmt.Sprintf("Removed chapter at %s", vtt.FormatTimestampShort(cue.Start)), false)
+			return
+		}
+	}
+
+	newCh := model.ChapterMarker{
+		OriginalTime: cue.Start,
+		AdjustedTime: cue.Start,
+		Title:        fmt.Sprintf("Chapter %d", len(m.chapters)+1),
+	}
+	m.chapters = append(m.chapters, newCh)
+	sort.Slice(m.chapters, func(i, j int) bool {
+		return m.chapters[i].OriginalTime < m.chapters[j].OriginalTime
+	})
+	m.SetFeedback(fmt.Sprintf("Added chapter at %s", vtt.FormatTimestampShort(cue.Start)), false)
 }
 
 // Update handles terminal messages and key inputs for the cut review screen.
@@ -131,6 +211,12 @@ func (m CutsModel) handleKey(msg tea.KeyMsg) (CutsModel, tea.Cmd) {
 		m.jumpCut(1)
 	case "N":
 		m.jumpCut(-1)
+	case "tab", "]":
+		m.JumpChapter(1)
+	case "shift+tab", "[":
+		m.JumpChapter(-1)
+	case "m":
+		m.toggleChapterOnCurrent()
 	case "?", "f1":
 		m.helpOpen = !m.helpOpen
 	case "esc":
@@ -139,6 +225,13 @@ func (m CutsModel) handleKey(msg tea.KeyMsg) (CutsModel, tea.Cmd) {
 		}
 	}
 	return m, nil
+}
+
+// SetFeedback sets a temporary notification banner in the footer.
+func (m *CutsModel) SetFeedback(msg string, isError bool) {
+	m.saveFeedback = msg
+	m.saveIsError = isError
+	m.savedAt = time.Now()
 }
 
 // SaveCuts explicitly persists current cut decisions to disk.
@@ -211,11 +304,32 @@ func (m *CutsModel) adjustScrollTo(visible int) {
 	if visible <= 0 {
 		return
 	}
-	if m.cursor < m.scrollOffset {
-		m.scrollOffset = m.cursor
+	items := m.buildTranscriptItems()
+	if len(items) == 0 {
+		m.scrollOffset = 0
+		return
 	}
-	if m.cursor >= m.scrollOffset+visible {
-		m.scrollOffset = m.cursor - visible + 1
+	cIdx := m.cursorItemIndex(items)
+	minVisibleIdx := cIdx
+	if cIdx > 0 && items[cIdx-1].isChapter {
+		minVisibleIdx = cIdx - 1
+	}
+
+	if minVisibleIdx < m.scrollOffset {
+		m.scrollOffset = minVisibleIdx
+	}
+	if cIdx >= m.scrollOffset+visible {
+		m.scrollOffset = cIdx - visible + 1
+	}
+	maxOffset := len(items) - visible
+	if maxOffset < 0 {
+		maxOffset = 0
+	}
+	if m.scrollOffset > maxOffset {
+		m.scrollOffset = maxOffset
+	}
+	if m.scrollOffset < 0 {
+		m.scrollOffset = 0
 	}
 }
 
@@ -250,6 +364,7 @@ func (m *CutsModel) toggleCurrent() (CutsModel, tea.Cmd) {
 	} else {
 		cue.Action = model.ActionCut
 		actionStr = "CUT"
+		m.chapters = cutter.AlignChaptersToKeptCues(m.chapters, m.cues)
 	}
 
 	if m.recordingDir != "" {
@@ -365,18 +480,7 @@ func (m CutsModel) View() string {
 		innerLines = cardHeight - 2
 	}
 
-	var bottomCard string
-	if m.helpOpen {
-		cardHeight = 8
-		if cardHeight > m.height-8 {
-			cardHeight = m.height - 8
-		}
-		innerLines = cardHeight - 2
-		bodyHeight = m.height - 2 - cardHeight
-		bottomCard = m.renderHelpModal(m.width, innerLines)
-	} else {
-		bottomCard = m.renderBottomCueCard(m.width, innerLines)
-	}
+	bottomCard := m.renderBottomCueCard(m.width, innerLines)
 
 	sidebarWidth := 38
 	if m.width > 120 {
@@ -411,6 +515,12 @@ func (m CutsModel) View() string {
 		}
 		res = append(res, renderedLines[len(renderedLines)-1])
 		fullView = strings.Join(res, "\n")
+	}
+
+	if m.helpOpen {
+		overlayLines := strings.Split(fullView, "\n")
+		overlayLines = m.overlayFloatingHelp(overlayLines)
+		fullView = strings.Join(overlayLines, "\n")
 	}
 
 	return fullView
@@ -462,10 +572,7 @@ func (m CutsModel) computeCardHeight(width int, cue model.SubtitleCue) (cardHeig
 
 // renderHeader renders the top title bar (exactly 1 line).
 func (m CutsModel) renderHeader() string {
-	title := m.theme.TitleStyle.Render(" talk_cut ")
-	sub := m.theme.SubtitleStyle.Render(fmt.Sprintf(" %s (%s) ", m.videoPath, vtt.FormatTimestampShort(m.media.Duration)))
-	bar := lipgloss.JoinHorizontal(lipgloss.Center, title, sub)
-	return lipgloss.NewStyle().Width(m.width).Render(bar)
+	return RenderTabBar(0, m.width, m.theme)
 }
 
 // renderTranscript renders the scrolling transcript panel with exact body height.
@@ -485,20 +592,26 @@ func (m *CutsModel) renderTranscript(width, bodyHeight int) string {
 		visible = 1
 	}
 	m.adjustScrollTo(visible)
+	items := m.buildTranscriptItems()
 
 	for i := 0; i < visible; i++ {
 		idx := m.scrollOffset + i
-		if idx >= len(m.cues) {
+		if idx >= len(items) {
 			lines = append(lines, strings.Repeat(" ", width))
 			continue
 		}
-		lines = append(lines, m.renderCueRow(idx, width))
+		item := items[idx]
+		if item.isChapter {
+			lines = append(lines, m.renderChapterBannerRow(item.chMarker, width))
+		} else {
+			lines = append(lines, m.renderCueRow(item.cueIdx, width))
+		}
 	}
 
 	return lipgloss.JoinVertical(lipgloss.Left, lines...)
 }
 
-// renderCueRow formats a single cue line with unicode symbols.
+// renderCueRow formats a single cue line with unicode symbols and edge-to-edge highlight.
 func (m CutsModel) renderCueRow(idx, width int) string {
 	cue := m.cues[idx]
 	isCur := idx == m.cursor
@@ -509,25 +622,61 @@ func (m CutsModel) renderCueRow(idx, width int) string {
 	}
 
 	ts := vtt.FormatTimestampShort(cue.Start)
-	var actionBadge string
+	actionIcon := "✔"
+	badgeFg := m.theme.Success
 	if cue.Action == model.ActionCut {
-		actionBadge = m.theme.IconCut.Render("✂")
+		actionIcon = "✂"
+		badgeFg = m.theme.Danger
 	} else if cue.Action == model.ActionReview {
-		actionBadge = m.theme.IconReview.Render("?")
-	} else {
-		actionBadge = m.theme.IconKept.Render("✔")
+		actionIcon = "?"
+		badgeFg = m.theme.Warning
 	}
 
 	text := cue.Text
-	prefixLen := len(cursorTag) + len(ts) + 3 + 2 + 1
-	availText := width - prefixLen - 3
-	if availText > 0 && len(text) > availText {
-		text = text[:availText-3] + "..."
+	prefixLen := lipgloss.Width(cursorTag) + 1 + lipgloss.Width(ts) + 2 + 1 + 2
+	availText := width - prefixLen
+	if availText > 0 && lipgloss.Width(text) > availText {
+		if availText > 3 {
+			text = text[:availText-3] + "..."
+		} else {
+			text = text[:availText]
+		}
 	}
 
-	raw := fmt.Sprintf("%s[%s] %s  %s", cursorTag, ts, actionBadge, text)
-	style := m.cueStyle(isCur, cue.Action)
-	return style.Width(width).Render(raw)
+	if isCur {
+		bg := m.theme.Highlight
+		fg := lipgloss.Color("#FFFFFF")
+		if cue.Action == model.ActionCut {
+			fg = m.theme.Danger
+		}
+		prefixStyle := lipgloss.NewStyle().Bold(true).Foreground(fg).Background(bg)
+		badgeStyle := lipgloss.NewStyle().Bold(true).Foreground(badgeFg).Background(bg)
+		textStyle := lipgloss.NewStyle().Bold(true).Foreground(fg).Background(bg)
+
+		prefixStr := prefixStyle.Render(fmt.Sprintf("%s[%s] ", cursorTag, ts))
+		badgeStr := badgeStyle.Render(actionIcon)
+
+		usedLen := lipgloss.Width(prefixStr) + lipgloss.Width(badgeStr) + 2 + lipgloss.Width(text)
+		padLen := width - usedLen
+		restText := fmt.Sprintf("  %s", text)
+		if padLen > 0 {
+			restText += strings.Repeat(" ", padLen)
+		}
+		restStr := textStyle.Render(restText)
+		return prefixStr + badgeStr + restStr
+	}
+
+	baseStyle := m.cueStyle(false, cue.Action)
+	var badgeStr string
+	if cue.Action == model.ActionCut {
+		badgeStr = m.theme.IconCut.Render(actionIcon)
+	} else if cue.Action == model.ActionReview {
+		badgeStr = m.theme.IconReview.Render(actionIcon)
+	} else {
+		badgeStr = m.theme.IconKept.Render(actionIcon)
+	}
+	raw := fmt.Sprintf("%s[%s] %s  %s", cursorTag, ts, badgeStr, text)
+	return baseStyle.Width(width).Render(raw)
 }
 
 // cueStyle determines the lipgloss style for a cue based on cursor and action.
@@ -621,12 +770,12 @@ func (m CutsModel) renderFeedbackBanner(availWidth int) string {
 func (m CutsModel) renderDefaultHints(availWidth int) string {
 	msg := m.statusMsg
 	if msg == "" {
-		if availWidth >= 68 {
-			msg = "j/k: nav | Space: cut/keep | s: save | p: preview | Tab: meta | F1: help | q: quit"
-		} else if availWidth >= 45 {
-			msg = "j/k: nav | Space: cut/keep | s: save | Tab: meta | F1: help"
-		} else if availWidth >= 25 {
-			msg = "j/k: nav | Space: cut | s: save"
+		if availWidth >= 75 {
+			msg = "j/k: nav | Space: cut/keep | Tab: chapter | c: commit cut | s: save | p: preview | F1: help"
+		} else if availWidth >= 55 {
+			msg = "j/k: nav | Space: cut/keep | Tab: chapter | c: commit cut | F1: help"
+		} else if availWidth >= 30 {
+			msg = "j/k: nav | Space: cut | c: cut video"
 		} else {
 			msg = ""
 		}

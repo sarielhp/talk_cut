@@ -71,3 +71,32 @@ func TestAdjustChapters(t *testing.T) {
 		t.Errorf("Conclusion adjusted time = %v, want 40s", adjusted[2].AdjustedTime)
 	}
 }
+
+func TestAlignChaptersToKeptCues(t *testing.T) {
+	cues := []model.SubtitleCue{
+		{ID: 1, Start: 0, End: 5 * time.Second, Action: model.ActionCut, Text: "Cut banter"},
+		{ID: 2, Start: 5 * time.Second, End: 10 * time.Second, Action: model.ActionCut, Text: "Cut intro"},
+		{ID: 3, Start: 10 * time.Second, End: 20 * time.Second, Action: model.ActionKeep, Text: "First kept cue"},
+		{ID: 4, Start: 20 * time.Second, End: 30 * time.Second, Action: model.ActionKeep, Text: "Second kept cue"},
+		{ID: 5, Start: 30 * time.Second, End: 40 * time.Second, Action: model.ActionCut, Text: "Middle cut"},
+		{ID: 6, Start: 40 * time.Second, End: 50 * time.Second, Action: model.ActionKeep, Text: "Third kept cue"},
+	}
+
+	chapters := []model.ChapterMarker{
+		{OriginalTime: 0, Title: "Introduction"},
+		{OriginalTime: 30 * time.Second, Title: "Middle Section"},
+	}
+
+	aligned := AlignChaptersToKeptCues(chapters, cues)
+	if len(aligned) != 2 {
+		t.Fatalf("expected 2 chapters, got %d", len(aligned))
+	}
+
+	if aligned[0].OriginalTime != 10*time.Second {
+		t.Errorf("aligned[0].OriginalTime = %v, want 10s", aligned[0].OriginalTime)
+	}
+
+	if aligned[1].OriginalTime != 40*time.Second {
+		t.Errorf("aligned[1].OriginalTime = %v, want 40s", aligned[1].OriginalTime)
+	}
+}

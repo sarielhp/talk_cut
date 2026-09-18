@@ -15,11 +15,9 @@ import (
 // renderSidebar renders the right-hand panel scaled to fit bodyHeight.
 func (m CutsModel) renderSidebar(width, bodyHeight int, stats model.CutStats, intervals []model.CutInterval) string {
 	statsBox := m.renderStatsBox(width, stats)
-	helpBox := m.renderHelpBox(width)
 
 	statsLines := 4
-	helpLines := 5
-	availForCuts := bodyHeight - statsLines - helpLines
+	availForCuts := bodyHeight - statsLines
 	var cutsBox string
 	if availForCuts >= 3 {
 		cutsBox = m.renderCutsBox(width, intervals, availForCuts-2)
@@ -30,7 +28,6 @@ func (m CutsModel) renderSidebar(width, bodyHeight int, stats model.CutStats, in
 	if cutsBox != "" {
 		boxes = append(boxes, cutsBox)
 	}
-	boxes = append(boxes, helpBox)
 
 	content := lipgloss.JoinVertical(lipgloss.Left, boxes...)
 	return lipgloss.NewStyle().Width(width).Height(bodyHeight).MarginLeft(1).Render(content)
@@ -83,15 +80,6 @@ func (m CutsModel) renderCutsBox(width int, intervals []model.CutInterval, maxIt
 	return m.theme.SidebarBox.Width(width - 2).Render(strings.Join(lines, "\n"))
 }
 
-// renderHelpBox renders keyboard shortcut hints.
-func (m CutsModel) renderHelpBox(width int) string {
-	hints := "[Space] Cut/Keep   [s] Save\n" +
-		"[n/N]   Jump Cut   [p] Preview\n" +
-		"[Tab]   Metadata   [F1/?] Help\n" +
-		"[q]     Quit"
-	return m.theme.SidebarBox.Width(width - 2).Render(hints)
-}
-
 // renderBottomCueCard renders the active cue card spanning full width.
 func (m CutsModel) renderBottomCueCard(width, innerLines int) string {
 	if len(m.cues) == 0 || m.cursor < 0 || m.cursor >= len(m.cues) {
@@ -118,6 +106,9 @@ func (m CutsModel) renderBottomCueCard(width, innerLines int) string {
 	}
 
 	durSec := fmt.Sprintf("%.2fs", cue.Duration().Seconds())
+	if ok, ch := m.isChapterStart(cue); ok {
+		statusBadge += " " + m.theme.TitleStyle.Render(" 🔖 "+ch.Title+" ")
+	}
 	line1 := fmt.Sprintf(
 		"Cue #%d of %d  [%s -> %s] (%s)  %s",
 		m.cursor+1,
@@ -188,25 +179,142 @@ func (m CutsModel) renderBottomCueCard(width, innerLines int) string {
 	return box
 }
 
-// renderHelpModal renders keyboard shortcuts cheat sheet.
-func (m CutsModel) renderHelpModal(width, innerLines int) string {
-	title := m.theme.TitleStyle.Render(" KEYBOARD SHORTCUTS ") + "  " + m.theme.HelpDesc.Render("(Press F1, ?, or Esc to close)")
+// overlayFloatingHelp renders a centered floating modal overlay over the screen.
+func (m CutsModel) overlayFloatingHelp(lines []string) []string {
+	if len(lines) < 8 || m.width < 30 {
+		return lines
+	}
+
+	dialog := m.renderFloatingHelpDialog(m.width)
+	dialogLines := strings.Split(dialog, "\n")
+	dHeight := len(dialogLines)
+	if dHeight >= len(lines)-2 {
+		dHeight = len(lines) - 2
+		dialogLines = dialogLines[:dHeight]
+	}
+
+	dWidth := lipgloss.Width(dialogLines[0])
+	startX := (m.width - dWidth) / 2
+	if startX < 0 {
+		startX = 0
+	}
+
+	startY := (len(lines) - dHeight) / 2
+	if startY < 1 {
+		startY = 1
+	}
+
+	res := make([]string, len(lines))
+	copy(res, lines)
+
+	for i := 0; i < dHeight; i++ {
+		targetY := startY + i
+		if targetY >= len(res)-1 {
+			break
+		}
+		padLeft := strings.Repeat(" ", startX)
+		padRight := ""
+		if m.width > startX+dWidth {
+			padRight = strings.Repeat(" ", m.width-startX-dWidth)
+		}
+		res[targetY] = padLeft + dialogLines[i] + padRight
+	}
+
+	return res
+}
+
+// renderFloatingHelpDialog renders a centered floating modal overlay with keyboard shortcuts.
+func (m CutsModel) renderFloatingHelpDialog(width int) string {
+	title := m.theme.TitleStyle.Render(" KEYBOARD SHORTCUTS ") + "  " + m.theme.HelpDesc.Render("(F1, ?, or Esc to close)")
 	rows := []string{
 		title,
-		"  j / k       Navigate cues              Space / x   Toggle Cut / Keep (auto-saves)",
-		"  g / G       Jump top / bottom          s / Ctrl+S  Save cut decisions to talk_cuts.json",
-		"  pgdn / pgup Page down / up             p           Preview cue at timestamp (ffplay)",
-		"  n / N       Jump next / prev cut       Tab / Enter Metadata & YouTube chapters",
-		"  F1 / ?      Toggle help                q / Ctrl+C  Quit",
+		"",
+		"  ← / →       Switch tabs (1..4)         Tab         Metadata screen",
+		"  j / k       Navigate cues              Space / x   Toggle Cut / Keep",
+		"  [ / ]       Jump prev / next chapter   m           Mark chapter start",
+		"  g / G       Jump top / bottom          s / Ctrl+S  Save cuts to disk",
+		"  pgdn / pgup Page down / up             p           Preview cue (ffplay)",
+		"  n / N       Jump next / prev cut       c / Ctrl+R  Commit cuts & render",
+		"  r / Ctrl+A  Redo chapters with AI      q / Ctrl+C  Quit talk_cut",
+		"  F1 / ?      Toggle help modal          1 .. 4      Direct tab jump",
 	}
-	if len(rows) > innerLines {
-		rows = rows[:innerLines]
+
+	dialogWidth := 78
+	if dialogWidth > width-4 {
+		dialogWidth = width - 4
 	}
-	for len(rows) < innerLines {
-		rows = append(rows, "")
+	if dialogWidth < 40 {
+		dialogWidth = 40
 	}
-	return m.theme.SidebarBox.
-		Width(width - 2).
-		Height(innerLines).
-		Render(strings.Join(rows, "\n"))
+
+	content := strings.Join(rows, "\n")
+	return lipgloss.NewStyle().
+		Border(lipgloss.RoundedBorder()).
+		BorderForeground(m.theme.Primary).
+		Background(lipgloss.Color("#0F172A")).
+		Foreground(lipgloss.Color("#F8FAFC")).
+		Padding(0, 1).
+		Width(dialogWidth).
+		Render(content)
+}
+
+// renderChapterBannerRow formats a dedicated separator line for a chapter header.
+func (m CutsModel) renderChapterBannerRow(ch model.ChapterMarker, width int) string {
+	timeStr := vtt.FormatTimestampShort(ch.OriginalTime)
+	title := fmt.Sprintf("── 🔖 %s (%s) ", ch.Title, timeStr)
+	tWidth := lipgloss.Width(title)
+	if tWidth > width {
+		runes := []rune(title)
+		for len(runes) > 0 && lipgloss.Width(string(runes)+"...") > width {
+			runes = runes[:len(runes)-1]
+		}
+		title = string(runes) + "..."
+		tWidth = lipgloss.Width(title)
+	}
+	fill := ""
+	if width > tWidth {
+		fill = strings.Repeat("─", width-tWidth)
+	}
+	content := title + fill
+	return lipgloss.NewStyle().
+		Bold(true).
+		Foreground(lipgloss.Color("#818CF8")).
+		Background(lipgloss.Color("#0F172A")).
+		Width(width).
+		Render(content)
+}
+
+// transcriptItem represents a single row in the scrolling transcript panel.
+type transcriptItem struct {
+	isChapter bool
+	cueIdx    int
+	chMarker  model.ChapterMarker
+}
+
+// buildTranscriptItems generates the unified row sequence with injected chapter headers.
+func (m CutsModel) buildTranscriptItems() []transcriptItem {
+	items := make([]transcriptItem, 0, len(m.cues)+len(m.chapters))
+	for i, cue := range m.cues {
+		if ok, ch := m.isChapterStart(cue); ok {
+			items = append(items, transcriptItem{
+				isChapter: true,
+				chMarker:  ch,
+			})
+		}
+		items = append(items, transcriptItem{
+			isChapter: false,
+			cueIdx:    i,
+		})
+	}
+	return items
+}
+
+// cursorItemIndex locates the row index corresponding to the currently selected cue.
+func (m CutsModel) cursorItemIndex(items []transcriptItem) int {
+	for idx, item := range items {
+		if !item.isChapter && item.cueIdx == m.cursor {
+			return idx
+		}
+	}
+	return 0
 }

@@ -74,7 +74,7 @@ func LoadMetaFile(dir string) (TalkMetadata, error) {
 
 	privacy := smf.Privacy
 	if privacy == "" {
-		privacy = "unlisted"
+		privacy = "public"
 	}
 
 	return TalkMetadata{

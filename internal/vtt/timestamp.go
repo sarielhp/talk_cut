@@ -101,19 +101,15 @@ func FormatTimestamp(d time.Duration) string {
 	return fmt.Sprintf("%02d:%02d:%02d.%03d", hours, minutes, seconds, millis)
 }
 
-// FormatTimestampShort formats duration for display without milliseconds: "HH:MM:SS" or "MM:SS".
+// FormatTimestampShort formats duration for display as "MM:SS" (e.g. "04:12" or "63:41").
 func FormatTimestampShort(d time.Duration) string {
 	if d < 0 {
 		d = 0
 	}
 
 	totalSeconds := int64(d.Seconds())
-	hours := totalSeconds / 3600
-	minutes := (totalSeconds % 3600) / 60
+	minutes := totalSeconds / 60
 	seconds := totalSeconds % 60
 
-	if hours > 0 {
-		return fmt.Sprintf("%02d:%02d:%02d", hours, minutes, seconds)
-	}
 	return fmt.Sprintf("%02d:%02d", minutes, seconds)
 }
