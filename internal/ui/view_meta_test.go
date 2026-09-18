@@ -261,3 +261,43 @@ func TestMetaModelPageAndHomeEndKeys(t *testing.T) {
 		t.Errorf("expected scrollOffset 0 after Home, got %d", m.scrollOffset)
 	}
 }
+
+func TestMetaModelApplyMetadata(t *testing.T) {
+	initial := model.TalkMetadata{
+		Title:     "Old Title",
+		Speaker:   "Old Speaker",
+		YouTubeID: "existing_vid_123",
+	}
+	m := NewMetaModel(initial, nil, "out.mp4")
+
+	incoming := model.TalkMetadata{
+		Title:       "New Title from Email",
+		Speaker:     "Dr. Alice",
+		Affiliation: "UIUC",
+		Abstract:    "A detailed talk about algorithms.",
+		Tags:        []string{"Algorithms", "Geometry"},
+		Privacy:     "public",
+	}
+
+	m.ApplyMetadata(incoming)
+	res := m.Metadata()
+
+	if res.Title != "New Title from Email" {
+		t.Errorf("expected updated title, got %q", res.Title)
+	}
+	if res.Speaker != "Dr. Alice" {
+		t.Errorf("expected updated speaker, got %q", res.Speaker)
+	}
+	if res.Affiliation != "UIUC" {
+		t.Errorf("expected updated affiliation, got %q", res.Affiliation)
+	}
+	if res.Abstract != "A detailed talk about algorithms." {
+		t.Errorf("expected updated abstract, got %q", res.Abstract)
+	}
+	if res.Privacy != "public" {
+		t.Errorf("expected updated privacy, got %q", res.Privacy)
+	}
+	if res.YouTubeID != "existing_vid_123" {
+		t.Errorf("expected preserved YouTubeID, got %q", res.YouTubeID)
+	}
+}

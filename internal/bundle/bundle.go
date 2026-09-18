@@ -7,6 +7,8 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+
+	"talk_cut/internal/eml"
 )
 
 // RecordingBundle holds paths to all detected recording artifacts in a directory.
@@ -17,6 +19,7 @@ type RecordingBundle struct {
 	AllVideos      []string `json:"all_videos"`
 	AudioPath      string   `json:"audio_path,omitempty"`
 	ChatPath       string   `json:"chat_path,omitempty"`
+	EmlPath        string   `json:"eml_path,omitempty"`
 }
 
 // DiscoverBundle inspects the directory and resolves recording files.
@@ -55,6 +58,12 @@ func DiscoverBundle(dir string, preferredLayout string) (*RecordingBundle, error
 	if len(b.AllVideos) == 0 {
 		return nil, fmt.Errorf("no video files (.mp4/.mkv) found in %q", dir)
 	}
+
+	emlPath, err := eml.FindUniqueEML(dir)
+	if err != nil {
+		return nil, fmt.Errorf("resolving announcement email in %q: %w", dir, err)
+	}
+	b.EmlPath = emlPath
 
 	b.PrimaryVideo = selectPrimaryVideo(b.AllVideos, preferredLayout)
 	return b, nil

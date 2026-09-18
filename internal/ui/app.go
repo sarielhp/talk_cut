@@ -60,6 +60,7 @@ type ytProgressMsg struct {
 type ytDoneMsg struct {
 	verification    *youtube.VideoVerification
 	captionUploaded bool
+	playlists       []model.PlaylistRef
 	err             error
 }
 
@@ -133,6 +134,9 @@ func NewAppModel(
 
 // Init initializes the Bubble Tea application.
 func (a AppModel) Init() tea.Cmd {
+	if a.youtubeView.VideoID() == "" {
+		return a.checkYouTubeExistingUpload()
+	}
 	return nil
 }
 
@@ -158,12 +162,38 @@ func (a AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case ytDoneMsg:
 		a.isUploading = false
 		a.youtubeView.SetDone(msg.verification, msg.captionUploaded, msg.err)
+		if msg.err == nil && msg.verification != nil && msg.verification.VideoID != "" {
+			meta := a.metaView.Metadata()
+			meta.YouTubeID = msg.verification.VideoID
+			meta.YouTubeURL = msg.verification.ShortURL
+			if meta.YouTubeURL == "" {
+				meta.YouTubeURL = fmt.Sprintf("https://youtu.be/%s", msg.verification.VideoID)
+			}
+			for _, pl := range msg.playlists {
+				meta.AddPlaylist(pl.ID, pl.Title)
+				a.youtubeView.SetPlaylistAdded(pl.ID, pl.Title)
+			}
+			a.metaView.ApplyMetadata(meta)
+			_ = model.SaveMetaFile(a.bundle.Dir, meta)
+		}
 		return a, nil
+	case ytDiscoveredMsg:
+		return a.handleYTDiscoveredMsg(msg)
+	case ytPlaylistsLoadedMsg:
+		return a.handleYTPlaylistsLoadedMsg(msg)
+	case ytVideoAddedToPlaylistMsg:
+		return a.handleYTVideoAddedToPlaylistMsg(msg)
+	case ytVideoRemovedFromPlaylistMsg:
+		return a.handleYTVideoRemovedFromPlaylistMsg(msg)
 	case ytCopiedMsg:
 		a.youtubeView.SetCopiedFeedback(true)
 		return a, nil
 	case aiChaptersMsg:
 		return a.handleAIChaptersMsg(msg)
+	case emlMetadataMsg:
+		return a.handleEMLMetadataMsg(msg)
+	case urlMetadataMsg:
+		return a.handleURLMetadataMsg(msg)
 	case tea.KeyMsg:
 		return a.handleKey(msg)
 	}
@@ -277,6 +307,9 @@ func (a AppModel) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 // handleGlobalNav routes Alt+arrows and numeric tab switching across all views.
 func (a *AppModel) handleGlobalNav(msg tea.KeyMsg) bool {
+	if a.screen == ScreenYouTube && a.youtubeView.IsSelectingPlaylist() {
+		return false
+	}
 	if msg.String() == "alt+left" || (msg.Alt && msg.Type == tea.KeyLeft) {
 		prev := (int(a.screen) - 1 + 5) % 5
 		a.switchTab(Screen(prev))
@@ -346,6 +379,10 @@ func (a AppModel) handleMetaKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			return a.startRender()
 		case "ctrl+a", "r":
 			return a, a.triggerAIChapters()
+		case "e", "E":
+			return a, a.triggerEMLMetadata()
+		case "u", "U":
+			return a, a.triggerURLMetadata()
 		case "enter":
 			if a.metaView.focusIndex == fieldCommit {
 				a.switchTab(ScreenProg)
@@ -356,6 +393,8 @@ func (a AppModel) handleMetaKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 	var cmd tea.Cmd
 	a.metaView, cmd = a.metaView.Update(msg)
+	meta := a.metaView.Metadata()
+	_ = model.SaveMetaFile(a.bundle.Dir, meta)
 	return a, cmd
 }
 
@@ -376,6 +415,9 @@ func (a AppModel) handleChaptersKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 	var cmd tea.Cmd
 	a.chaptersView, cmd = a.chaptersView.Update(msg)
+	meta := a.metaView.Metadata()
+	meta.Chapters = a.chaptersView.Chapters()
+	_ = model.SaveMetaFile(a.bundle.Dir, meta)
 	return a, cmd
 }
 

@@ -127,7 +127,62 @@ func NewMetaModel(meta model.TalkMetadata, cuts []model.CutInterval, defaultOutp
 		height:       30,
 		scrollOffset: 0,
 		isEditing:    false,
-		statusMsg:    "↑/↓: fields | Enter: edit | Space: privacy | Alt+←/→: tabs | 1-4: screen",
+		statusMsg:    "↑/↓: fields | Enter: edit | e: fill from .eml | u: fill from URL | Space: privacy | 1-5: tabs",
+	}
+}
+
+// ApplyMetadata updates form inputs and state with incoming metadata.
+func (m *MetaModel) ApplyMetadata(meta model.TalkMetadata) {
+	if meta.Title != "" {
+		m.inputs[0].SetValue(meta.Title)
+		m.metadata.Title = meta.Title
+	}
+	if meta.Speaker != "" {
+		m.inputs[1].SetValue(meta.Speaker)
+		m.metadata.Speaker = meta.Speaker
+	}
+	if meta.Affiliation != "" {
+		m.inputs[2].SetValue(meta.Affiliation)
+		m.metadata.Affiliation = meta.Affiliation
+	}
+	if meta.URL != "" {
+		m.inputs[3].SetValue(meta.URL)
+		m.metadata.URL = meta.URL
+	}
+	if len(meta.Tags) > 0 {
+		m.inputs[4].SetValue(strings.Join(meta.Tags, ", "))
+		m.metadata.Tags = meta.Tags
+	}
+	if meta.Abstract != "" {
+		m.abstract = meta.Abstract
+		m.metadata.Abstract = meta.Abstract
+	}
+	if meta.Privacy != "" {
+		for i, opt := range m.privacyOpts {
+			if strings.EqualFold(opt, meta.Privacy) {
+				m.privacyIdx = i
+				m.metadata.Privacy = opt
+				break
+			}
+		}
+	}
+	if len(meta.Chapters) > 0 {
+		m.metadata.Chapters = meta.Chapters
+	}
+	if meta.YouTubeID != "" {
+		m.metadata.YouTubeID = meta.YouTubeID
+	}
+	if meta.YouTubeURL != "" {
+		m.metadata.YouTubeURL = meta.YouTubeURL
+	}
+	if len(meta.AllPlaylists()) > 0 {
+		m.metadata.Playlists = meta.AllPlaylists()
+		m.metadata.PlaylistID = meta.PlaylistID
+		m.metadata.PlaylistTitle = meta.PlaylistTitle
+	} else if meta.PlaylistID == "" && len(meta.Playlists) == 0 {
+		m.metadata.Playlists = nil
+		m.metadata.PlaylistID = ""
+		m.metadata.PlaylistTitle = ""
 	}
 }
 
@@ -150,6 +205,11 @@ func (m MetaModel) Metadata() model.TalkMetadata {
 	meta.Tags = tags
 	meta.Privacy = m.privacyOpts[m.privacyIdx]
 	meta.Abstract = m.abstract
+	if meta.YouTubeID != "" && meta.YouTubeURL == "" {
+		meta.YouTubeURL = fmt.Sprintf("https://youtu.be/%s", meta.YouTubeID)
+	} else if meta.YouTubeURL != "" && meta.YouTubeID == "" {
+		meta.YouTubeID = meta.EffectiveYouTubeID()
+	}
 	return meta
 }
 
@@ -671,7 +731,7 @@ func (m MetaModel) renderFooter(totalLines, visibleHeight int) string {
 	if m.isEditing {
 		msg = "Editing field... Enter/Esc: done | ←/→: move cursor"
 	} else if msg == "" {
-		msg = "↑/↓: fields | Enter: edit | Space: privacy | Alt+←/→: tabs | 1-4: screen"
+		msg = "↑/↓: fields | Enter: edit | e: fill from .eml | u: fill from URL | Space: privacy | 1-5: tabs"
 	}
 	bar := m.theme.HelpDesc.Render(" " + msg + scrollInfo)
 	return lipgloss.NewStyle().Width(m.width).Render(bar)

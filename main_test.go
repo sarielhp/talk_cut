@@ -2,10 +2,15 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"io"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
+
+	"talk_cut/internal/config"
+	"talk_cut/internal/model"
 )
 
 func captureStdout(f func() error) (string, error) {
@@ -84,5 +89,84 @@ func TestRunUpload_InvalidDir(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "is not a valid directory") {
 		t.Errorf("expected invalid directory error, got: %v", err)
+	}
+}
+
+func TestHasEmptyMetadataFields(t *testing.T) {
+	dir := "/path/to/26/09/15"
+
+	// All empty / default
+	meta1 := model.TalkMetadata{
+		Title: "15", // equals filepath.Base(dir)
+	}
+	if !hasEmptyMetadataFields(meta1, dir) {
+		t.Errorf("expected true for default title and empty speaker/abstract")
+	}
+
+	// Completely empty title
+	meta2 := model.TalkMetadata{}
+	if !hasEmptyMetadataFields(meta2, dir) {
+		t.Errorf("expected true for empty struct")
+	}
+
+	// Non-default title
+	meta3 := model.TalkMetadata{
+		Title: "A Great Talk on Geometry",
+	}
+	if hasEmptyMetadataFields(meta3, dir) {
+		t.Errorf("expected false when title is customized")
+	}
+
+	// Speaker set
+	meta4 := model.TalkMetadata{
+		Title:   "15",
+		Speaker: "Alice Smith",
+	}
+	if hasEmptyMetadataFields(meta4, dir) {
+		t.Errorf("expected false when speaker is set")
+	}
+
+	// Abstract set
+	meta5 := model.TalkMetadata{
+		Title:    "15",
+		Abstract: "This talk discusses algorithms.",
+	}
+	if hasEmptyMetadataFields(meta5, dir) {
+		t.Errorf("expected false when abstract is set")
+	}
+}
+
+func TestInitialMetadata_PreservesExistingEdits(t *testing.T) {
+	tempDir := t.TempDir()
+	savedMeta := model.TalkMetadata{
+		Title:    "Manually Curated Title",
+		Speaker:  "Curated Speaker",
+		Abstract: "Curated abstract.",
+		Privacy:  "unlisted",
+	}
+	if err := model.SaveMetaFile(tempDir, savedMeta); err != nil {
+		t.Fatalf("saving meta file: %v", err)
+	}
+
+	emlPath := filepath.Join(tempDir, "announcement.eml")
+	emlContent := "Subject: Different Email Title\r\n\r\nEmail body content"
+	if err := os.WriteFile(emlPath, []byte(emlContent), 0644); err != nil {
+		t.Fatalf("writing dummy eml: %v", err)
+	}
+
+	opts := &cliOptions{
+		dir:      tempDir,
+		noAI:     false,
+		reDetect: false,
+		metaOnly: false,
+	}
+	cfg := config.Config{}
+
+	meta := initialMetadata(context.Background(), opts, cfg)
+	if meta.Title != "Manually Curated Title" {
+		t.Errorf("expected Title to be preserved as %q, got %q", "Manually Curated Title", meta.Title)
+	}
+	if meta.Speaker != "Curated Speaker" {
+		t.Errorf("expected Speaker to be preserved as %q, got %q", "Curated Speaker", meta.Speaker)
 	}
 }

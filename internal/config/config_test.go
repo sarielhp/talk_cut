@@ -117,3 +117,28 @@ func TestChannelTokenResolution(t *testing.T) {
 		t.Errorf("expected custom theory path, got %q", customPath)
 	}
 }
+
+func TestSaveConfigAndDefaultPlaylist(t *testing.T) {
+	tempHome := t.TempDir()
+	t.Setenv("HOME", tempHome)
+
+	cfg := DefaultConfig()
+	cfg.DefaultChannel = "CompGeom"
+	cfg.DefaultPlaylist = "PL_test_playlist_123"
+
+	if err := SaveConfig(cfg); err != nil {
+		t.Fatalf("SaveConfig failed: %v", err)
+	}
+
+	loaded, err := LoadConfig()
+	if err != nil {
+		t.Fatalf("LoadConfig failed: %v", err)
+	}
+
+	if loaded.DefaultChannel != "CompGeom" {
+		t.Errorf("expected DefaultChannel CompGeom, got %q", loaded.DefaultChannel)
+	}
+	if loaded.DefaultPlaylist != "PL_test_playlist_123" {
+		t.Errorf("expected DefaultPlaylist PL_test_playlist_123, got %q", loaded.DefaultPlaylist)
+	}
+}

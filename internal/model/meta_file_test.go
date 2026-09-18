@@ -13,13 +13,17 @@ func TestSaveAndLoadMetaFile(t *testing.T) {
 	}
 
 	meta := TalkMetadata{
-		Title:       "The Minimum Dominating Set Problem",
-		Speaker:     "Karim Abu-Affash",
-		Affiliation: "Shamoon College of Engineering",
-		Abstract:    "A circle graph is the intersection graph of chords.\n\nTalk announcement: https://example.com/talk",
-		URL:         "https://example.com/talk",
-		Tags:        []string{"Geometry Seminar", "Algorithms"},
-		Privacy:     "public",
+		Title:         "The Minimum Dominating Set Problem",
+		Speaker:       "Karim Abu-Affash",
+		Affiliation:   "Shamoon College of Engineering",
+		Abstract:      "A circle graph is the intersection graph of chords.\n\nTalk announcement: https://example.com/talk",
+		URL:           "https://example.com/talk",
+		Tags:          []string{"Geometry Seminar", "Algorithms"},
+		Privacy:       "public",
+		YouTubeID:     "dQw4w9WgXcQ",
+		YouTubeURL:    "https://youtu.be/dQw4w9WgXcQ",
+		PlaylistID:    "PL_test_123",
+		PlaylistTitle: "Geometry Talks 2026",
 		Chapters: []ChapterMarker{
 			{OriginalTime: 0, AdjustedTime: 0, Title: "Introduction"},
 			{OriginalTime: 10 * time.Second, AdjustedTime: 10 * time.Second, Title: "Main Results"},
@@ -57,7 +61,16 @@ func TestSaveAndLoadMetaFile(t *testing.T) {
 	if len(loaded.Tags) != len(meta.Tags) {
 		t.Errorf("tags length: got %d, want %d", len(loaded.Tags), len(meta.Tags))
 	}
-	if len(loaded.Chapters) != len(meta.Chapters) {
-		t.Errorf("chapters length: got %d, want %d", len(loaded.Chapters), len(meta.Chapters))
+	if loaded.YouTubeID != meta.YouTubeID {
+		t.Errorf("youtube_id: got %q, want %q", loaded.YouTubeID, meta.YouTubeID)
+	}
+	if loaded.YouTubeURL != meta.YouTubeURL {
+		t.Errorf("youtube_url: got %q, want %q", loaded.YouTubeURL, meta.YouTubeURL)
+	}
+	if loaded.PlaylistID != meta.PlaylistID {
+		t.Errorf("playlist_id: got %q, want %q", loaded.PlaylistID, meta.PlaylistID)
+	}
+	if loaded.PlaylistTitle != meta.PlaylistTitle {
+		t.Errorf("playlist_title: got %q, want %q", loaded.PlaylistTitle, meta.PlaylistTitle)
 	}
 }

@@ -14,30 +14,40 @@ const MetaFileName = "talk_meta.json"
 
 // SavedMetaFile represents the JSON structure persisted to talk_meta.json.
 type SavedMetaFile struct {
-	UpdatedAt   string          `json:"updated_at"`
-	URL         string          `json:"url,omitempty"`
-	Title       string          `json:"title"`
-	Speaker     string          `json:"speaker"`
-	Affiliation string          `json:"affiliation,omitempty"`
-	Abstract    string          `json:"abstract"`
-	Tags        []string        `json:"tags,omitempty"`
-	Privacy     string          `json:"privacy"`
-	Chapters    []ChapterMarker `json:"chapters,omitempty"`
+	UpdatedAt     string          `json:"updated_at"`
+	URL           string          `json:"url,omitempty"`
+	Title         string          `json:"title"`
+	Speaker       string          `json:"speaker"`
+	Affiliation   string          `json:"affiliation,omitempty"`
+	Abstract      string          `json:"abstract"`
+	Tags          []string        `json:"tags,omitempty"`
+	Privacy       string          `json:"privacy"`
+	Chapters      []ChapterMarker `json:"chapters,omitempty"`
+	YouTubeID     string          `json:"youtube_id,omitempty"`
+	YouTubeURL    string          `json:"youtube_url,omitempty"`
+	PlaylistID    string          `json:"playlist_id,omitempty"`
+	PlaylistTitle string          `json:"playlist_title,omitempty"`
+	Playlists     []PlaylistRef   `json:"playlists,omitempty"`
 }
 
 // SaveMetaFile writes the talk metadata to <dir>/talk_meta.json.
 func SaveMetaFile(dir string, meta TalkMetadata) error {
 	path := filepath.Join(dir, MetaFileName)
 	smf := SavedMetaFile{
-		UpdatedAt:   time.Now().UTC().Format(time.RFC3339),
-		URL:         meta.URL,
-		Title:       meta.Title,
-		Speaker:     meta.Speaker,
-		Affiliation: meta.Affiliation,
-		Abstract:    meta.Abstract,
-		Tags:        meta.Tags,
-		Privacy:     meta.Privacy,
-		Chapters:    meta.Chapters,
+		UpdatedAt:     time.Now().UTC().Format(time.RFC3339),
+		URL:           meta.URL,
+		Title:         meta.Title,
+		Speaker:       meta.Speaker,
+		Affiliation:   meta.Affiliation,
+		Abstract:      meta.Abstract,
+		Tags:          meta.Tags,
+		Privacy:       meta.Privacy,
+		Chapters:      meta.Chapters,
+		YouTubeID:     meta.EffectiveYouTubeID(),
+		YouTubeURL:    meta.YouTubeWatchURL(),
+		PlaylistID:    meta.PlaylistID,
+		PlaylistTitle: meta.PlaylistTitle,
+		Playlists:     meta.AllPlaylists(),
 	}
 
 	data, err := json.MarshalIndent(smf, "", "  ")
@@ -77,14 +87,32 @@ func LoadMetaFile(dir string) (TalkMetadata, error) {
 		privacy = "public"
 	}
 
-	return TalkMetadata{
-		Title:       smf.Title,
-		Speaker:     smf.Speaker,
-		Affiliation: smf.Affiliation,
-		Abstract:    smf.Abstract,
-		URL:         smf.URL,
-		Tags:        smf.Tags,
-		Privacy:     privacy,
-		Chapters:    smf.Chapters,
-	}, nil
+	meta := TalkMetadata{
+		Title:         smf.Title,
+		Speaker:       smf.Speaker,
+		Affiliation:   smf.Affiliation,
+		Abstract:      smf.Abstract,
+		URL:           smf.URL,
+		Tags:          smf.Tags,
+		Privacy:       privacy,
+		Chapters:      smf.Chapters,
+		YouTubeID:     smf.YouTubeID,
+		YouTubeURL:    smf.YouTubeURL,
+		PlaylistID:    smf.PlaylistID,
+		PlaylistTitle: smf.PlaylistTitle,
+		Playlists:     smf.Playlists,
+	}
+	if len(meta.Playlists) == 0 && meta.PlaylistID != "" {
+		meta.Playlists = []PlaylistRef{{ID: meta.PlaylistID, Title: meta.PlaylistTitle}}
+	} else if len(meta.Playlists) > 0 {
+		meta.syncLegacyPlaylist()
+	}
+	if meta.YouTubeID == "" && meta.YouTubeURL != "" {
+		meta.YouTubeID = ExtractYouTubeID(meta.YouTubeURL)
+	}
+	if meta.YouTubeURL == "" && meta.YouTubeID != "" {
+		meta.YouTubeURL = meta.YouTubeWatchURL()
+	}
+
+	return meta, nil
 }

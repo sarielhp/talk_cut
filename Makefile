@@ -14,7 +14,7 @@ $(BIN_NAME): $(GO_FILES) go.mod VERSION
 
 install: $(BIN_NAME)
 	mkdir -p ~/bin
-	cp $(BIN_NAME) ~/bin/
+	install -m 755 $(BIN_NAME) ~/bin/
 
 # Fast quality gate: formatting, vet, staticcheck, cognitive audit, unit tests, build
 check:

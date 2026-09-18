@@ -101,3 +101,106 @@ func TestYouTubeModelErrorView(t *testing.T) {
 		t.Errorf("expected error message in view, got:\n%s", view)
 	}
 }
+
+func TestYouTubeModelUpdateDetailsView(t *testing.T) {
+	cfg := config.DefaultConfig()
+	meta := model.TalkMetadata{
+		Title:     "Spanners",
+		YouTubeID: "vid_test_123",
+	}
+	m := NewYouTubeModel("", "", meta, cfg)
+	m.SetDimensions(100, 30)
+	m.hasToken = true
+
+	if m.VideoID() != "vid_test_123" {
+		t.Errorf("expected VideoID vid_test_123, got %q", m.VideoID())
+	}
+
+	view := m.View()
+	if !strings.Contains(view, "vid_test_123") {
+		t.Errorf("expected view to contain YouTube video ID, got:\n%s", view)
+	}
+	if !strings.Contains(view, "Update Details") {
+		t.Errorf("expected view to contain Update Details button, got:\n%s", view)
+	}
+
+	m.SetUpdatingDetails(true)
+	updatingView := m.View()
+	if !strings.Contains(updatingView, "Updating video title, description, and chapters") {
+		t.Errorf("expected updating description in view, got:\n%s", updatingView)
+	}
+}
+
+func TestYouTubeModelPlaylistSelection(t *testing.T) {
+	cfg := config.DefaultConfig()
+	cfg.DefaultPlaylist = "pl_default"
+
+	meta := model.TalkMetadata{
+		Title:      "Oriented Spanners",
+		PlaylistID: "pl_existing",
+	}
+
+	m := NewYouTubeModel("", "", meta, cfg)
+	m.SetDimensions(100, 30)
+
+	playlists := []youtube.Playlist{
+		{ID: "pl_other", Title: "Other Talks", ItemCount: 5},
+		{ID: "pl_default", Title: "Default Seminar", ItemCount: 12},
+		{ID: "pl_existing", Title: "Geometry Seminar", ItemCount: 30},
+	}
+
+	m.SetPlaylists(playlists, cfg.DefaultPlaylist)
+	if m.SelectedPlaylist() == nil || m.SelectedPlaylist().ID != "pl_existing" {
+		t.Fatalf("expected existing playlist selected by default, got %+v", m.SelectedPlaylist())
+	}
+
+	m.NextPlaylist()
+	if m.SelectedPlaylist().ID != "pl_other" {
+		t.Errorf("expected wrap-around to pl_other, got %s", m.SelectedPlaylist().ID)
+	}
+
+	m.PrevPlaylist()
+	if m.SelectedPlaylist().ID != "pl_existing" {
+		t.Errorf("expected wrap-back to pl_existing, got %s", m.SelectedPlaylist().ID)
+	}
+
+	m.SetSelectingPlaylist(true)
+	view := m.View()
+	if !strings.Contains(view, "SELECT YOUTUBE PLAYLIST") {
+		t.Errorf("expected playlist selector title in view, got:\n%s", view)
+	}
+	if !strings.Contains(view, "[DEFAULT]") {
+		t.Errorf("expected [DEFAULT] badge in view, got:\n%s", view)
+	}
+	if !strings.Contains(view, "[ADDED]") {
+		t.Errorf("expected [ADDED] badge in view, got:\n%s", view)
+	}
+
+	m.SetPlaylistAdded("pl_default", "Default Seminar")
+	if m.SelectedPlaylist() == nil {
+		t.Fatal("expected selected playlist not nil")
+	}
+	m.SetPlaylistFeedback("Added to Default Seminar")
+	viewWithFeedback := m.View()
+	if !strings.Contains(viewWithFeedback, "Added to Default Seminar") {
+		t.Errorf("expected feedback in view, got:\n%s", viewWithFeedback)
+	}
+
+	// Test multiple playlists rendering in preflight
+	m.SetPlaylistAdded("pl_other", "Other Talks")
+	if len(m.talkMeta.AllPlaylists()) != 3 {
+		t.Fatalf("expected 3 playlists, got %d", len(m.talkMeta.AllPlaylists()))
+	}
+	m.SetSelectingPlaylist(false)
+	m.hasToken = true
+	preflightView := m.View()
+	if !strings.Contains(preflightView, "Playlists:") {
+		t.Errorf("expected 'Playlists:' in preflight view for multiple playlists, got:\n%s", preflightView)
+	}
+
+	// Test playlist removal
+	m.SetPlaylistRemoved("pl_other", "Other Talks")
+	if m.talkMeta.HasPlaylist("pl_other") {
+		t.Errorf("expected pl_other removed")
+	}
+}

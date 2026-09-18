@@ -20,6 +20,7 @@ type Config struct {
 	Channels         map[string]string `json:"channels,omitempty"`
 	DefaultPrivacy   string            `json:"default_privacy"`
 	PreferredLayout  string            `json:"preferred_layout"` // "slides", "clean", "speaker", "gallery"
+	DefaultPlaylist  string            `json:"default_playlist,omitempty"`
 }
 
 // DefaultConfig returns baseline configuration settings.
@@ -56,6 +57,9 @@ func LoadConfig() (Config, error) {
 	}
 	if envTok := os.Getenv("TALK_CUT_YOUTUBE_TOKEN"); envTok != "" {
 		cfg.YouTubeTokenFile = strings.TrimSpace(envTok)
+	}
+	if envPlay := os.Getenv("TALK_CUT_DEFAULT_PLAYLIST"); envPlay != "" {
+		cfg.DefaultPlaylist = strings.TrimSpace(envPlay)
 	}
 
 	return cfg, nil
@@ -98,7 +102,35 @@ func loadFromTalkCutConfig(cfg *Config, home string) {
 		if stored.PreferredLayout != "" {
 			cfg.PreferredLayout = stored.PreferredLayout
 		}
+		if stored.DefaultPlaylist != "" {
+			cfg.DefaultPlaylist = stored.DefaultPlaylist
+		}
 	}
+}
+
+// SaveConfig writes the given configuration back to ~/.config/talk_cut/config.json.
+func SaveConfig(cfg Config) error {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return fmt.Errorf("resolving user home dir: %w", err)
+	}
+
+	dir := filepath.Join(home, ".config", "talk_cut")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return fmt.Errorf("creating config directory %q: %w", dir, err)
+	}
+
+	path := filepath.Join(dir, "config.json")
+	data, err := json.MarshalIndent(cfg, "", "  ")
+	if err != nil {
+		return fmt.Errorf("marshaling config: %w", err)
+	}
+
+	if err := os.WriteFile(path, append(data, '\n'), 0o644); err != nil {
+		return fmt.Errorf("writing config file %q: %w", path, err)
+	}
+
+	return nil
 }
 
 // ResolveChannelTokenFile returns the file path for a channel's OAuth2 token.

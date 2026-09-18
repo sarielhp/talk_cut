@@ -17,15 +17,15 @@ It leverages an LLM (via OpenRouter, e.g. Gemini 2.5 Flash Lite) to automaticall
 ```mermaid
 flowchart TD
     A["Zoom Recording Bundle\n(MP4, VTT Transcript, Chat)"] --> B["Ingestion & Feed Selection\n(--layout slides | clean | speaker | gallery)"]
-    U["Seminar Announcement URL\n(-u <url>)"] --> M["Web Metadata Extractor\n(Speaker, Affiliation, Title, Abstract)"]
+    U["Seminar Announcement\n(Web URL or .eml Email File)"] --> M["Metadata Extractor\n(Speaker, Affiliation, Title, Abstract)"]
     B --> C["AI Candidate Cut Detection\n(OpenRouter / Gemini 2.5 Flash Lite)"]
     M --> C
-    C --> D["Interactive Terminal UI (Bubble Tea)\n• Cut Reviewer & Cue Toggles\n• Live Video Preview (mpv / vlc / ffplay)\n• Metadata Editor & Live Chapters Preview"]
+    C --> D["Interactive Terminal UI (Bubble Tea)\n• Cut Reviewer & Cue Toggles\n• Live Video Preview (mpv / vlc / ffplay)\n• Metadata Editor (.eml / URL / Chapters)\n• YouTube Publisher & Playlist Picker"]
     D --> E["Lossless FFmpeg Engine\n• Keyframe Interval Slicing\n• Concat Demuxer (-c copy)"]
     D --> F["Subtitle & Chapter Retimer\n• Retimed WebVTT (_cut.vtt)\n• YouTube Chapters (_chapters.txt)"]
     E --> G["Exported Artifacts\n• <talk>_cut.mp4\n• <talk>_cut.vtt\n• <talk>_chapters.txt"]
     F --> G
-    G --> H["YouTube Publishing Engine\n• Resumable Video Upload\n• Multi-Channel OAuth2 Loopback\n• Synchronized Caption Track Insert"]
+    G --> H["YouTube Publishing & Sync Engine\n• Resumable Video Upload & Captions\n• Metadata, Chapter & Details Update\n• Multi-Playlist Live Management"]
 ```
 
 ---
@@ -36,16 +36,19 @@ flowchart TD
 - **Smart Presentation Layout Selection**: Zoom bundles often record multiple video perspectives. Choose the optimal layout using `--layout` (`slides` with speaker thumbnail, `clean` slides without thumbnail, `speaker`, or `gallery`).
 - **AI Cut & Preamble Detection**: Analyzes the WebVTT transcript using token-optimized sampling with OpenRouter (Gemini 2.5 Flash Lite by default) to identify intro banter, microphone tests, slide transitions, dead pauses, and trailing audience Q&A.
 - **AI Natural Chapter Detection**: Automatically detects topical chapter shifts across the talk transcript (problem statement, theorems, algorithms, evaluations, conclusions), persisting markers in `talk_meta.json` and dynamically adjusting timestamps post-cut.
-- **Web Metadata Scraping**: Supply a seminar announcement web page (`-u <url>` or `talk_cut --meta-only <dir> <url>`) to automatically scrape the speaker's name, institutional affiliation, talk title, abstract, and tags.
+- **Email Announcement (.eml) & Web Ingestion**: Automatically ingests speaker name, institutional affiliation, talk title, abstract, and tags directly from `.eml` email files placed in the talk directory, or scrapes them from a seminar announcement web URL (`-u <url>` or `--meta-only`). In the TUI, press <kbd>e</kbd> to extract from `.eml` or <kbd>u</kbd> to fetch from the URL.
 - **True-Color Split-Pane Terminal Interface**:
   - **Cut Reviewer**: Scroll through timestamped transcript cues with visual status indicators (`[✔ KEEP]`, `[✂ CUT]`), speaker labels, and AI rationale badges.
   - **Live External Video Preview**: Press <kbd>p</kbd> on any subtitle cue to spawn an external player (`mpv`, `vlc`, `ffplay`, or `totem`) synchronized exactly to that moment.
-  - **Full-Width Metadata & Chapter Editor**: Edit title, speaker, affiliation, announcement URL, tags, privacy (`unlisted`, `public`, `private`), and abstract. Supports clickable terminal hyperlinks via OSC 8 escape codes.
+  - **Full-Width Metadata & Chapter Editor**: Edit title, speaker, affiliation, announcement URL, tags, privacy (`unlisted`, `public`, `private`), and abstract. Supports clickable terminal hyperlinks via OSC 8 escape codes, and aggressively auto-saves all edits to `talk_meta.json`.
+  - **Interactive YouTube Playlist Picker**: Press <kbd>p</kbd> in the YouTube tab to browse channel playlists, toggle talk membership with immediate live YouTube sync, and designate default playlists.
   - **Recalculated YouTube Chapters**: Real-time chapter marker recalculation that adjusts timestamps across cuts and guarantees that the first chapter starts at `00:00`.
   - **Real-Time Progress Dashboard**: Progress bar showing rendering stages (slicing, concatenation, subtitle retiming, chapter generation, and YouTube upload).
 - **Lossless FFmpeg Slicing & Splicing**: Slices kept intervals and joins them using FFmpeg's `concat` demuxer with stream copying (`-c copy`). Preserves original 1080p/4K video quality with zero generational loss and completes renders in seconds.
 - **Subtitle & Chapter Synchronization**: Produces retimed WebVTT (`_cut.vtt`) subtitle files and a ready-to-paste YouTube chapter file (`_chapters.txt`).
 - **Multi-Channel YouTube Publishing**: Built-in OAuth2 desktop authorization loopback server supporting multiple channel profiles (e.g. `--channel seminar`, `--channel course`), resumable video uploads, and automated caption track publishing.
+- **YouTube Details & Chapter Synchronization**: Update video title, description (with adjusted chapters and talk link), tags, privacy, and playlist assignments on YouTube for already-uploaded talks via `talk_cut youtube update` or directly from Tab 5 (<kbd>d</kbd> / <kbd>Enter</kbd>), with built-in duration validation (&plusmn;1s tolerance).
+- **Multi-Playlist Management**: Organize talks across multiple YouTube playlists from the CLI (`talk_cut youtube playlist list|create|set-default|add|remove`) or interactively within the TUI.
 - **Strict Security Model**: Zero hardcoded secrets or API tokens. OpenRouter keys and OAuth tokens are stored in `~/.config/auth/` with `0600` permissions.
 
 ---
@@ -97,24 +100,49 @@ Launch the interactive terminal interface:
 talk_cut examples/26_09_08/
 ```
 
-### 3. Automatic Metadata Extraction via Web URL
+### 3. Automatic Metadata Extraction via Web URL or .eml Email
 Pass a seminar announcement URL to populate the speaker name, affiliation, title, and abstract automatically:
 
 ```bash
 talk_cut -u "https://seminar.example.edu/talks/2026/linear-approximation" examples/26_09_08/
 ```
 
-Alternatively, use the `--meta-only` flag to fetch and persist metadata into `talk_meta.json` without opening the editor:
+Or fetch and persist metadata into `talk_meta.json` without opening the editor:
 
 ```bash
 talk_cut --meta-only examples/26_09_08/ "https://seminar.example.edu/talks/2026/linear-approximation"
 ```
 
-### 4. Direct YouTube Upload
-Cut the talk and upload directly to an authorized YouTube channel upon completion:
+If an announcement email file (`.eml`) exists in the directory, `talk_cut` extracts metadata automatically upon launch, or on demand inside the TUI by pressing <kbd>e</kbd> in Tab 2.
+
+### 4. Direct YouTube Upload & Playlist Assignment
+Cut the talk and upload directly to an authorized YouTube channel, optionally adding it to a playlist:
 
 ```bash
-talk_cut --upload --channel seminar examples/26_09_08/
+talk_cut --upload --channel seminar --playlist "Geometry Seminar Fall 2026" examples/26_09_08/
+```
+
+### 5. Update Details on an Already-Uploaded Talk
+Update video title, description (with adjusted chapters and seminar link), tags, privacy, and playlists without re-rendering or re-uploading:
+
+```bash
+# Preview what would be updated on YouTube:
+talk_cut youtube update --dry-run examples/26_09_08/
+
+# Apply updates to YouTube (verifies talk exists and video length matches within ±1s):
+talk_cut youtube update examples/26_09_08/
+```
+
+### 6. Manage YouTube Playlists via CLI
+```bash
+# List all playlists on the channel:
+talk_cut youtube playlist list --channel seminar
+
+# Create a new playlist and set it as default:
+talk_cut youtube playlist create "Geometry Seminar Fall 2026" --default
+
+# Add an uploaded talk to a playlist:
+talk_cut youtube playlist add "Geometry Seminar Fall 2026" examples/26_09_08/
 ```
 
 ---
@@ -161,11 +189,13 @@ talk_cut --upload --channel seminar examples/26_09_08/
 | <kbd>Enter</kbd> | Enter edit mode for focused field (or commit on button) |
 | <kbd>Esc</kbd> / <kbd>Enter</kbd> | Exit edit mode (returns to global tab navigation) |
 | <kbd>Tab</kbd> / <kbd>Shift+Tab</kbd> | Cycle focus to next / previous input field |
-| <kbd>PgDn</kbd> / <kbd>PgUp</kbd> | Page scroll form viewport down / up |
-| <kbd>Home</kbd> / <kbd>End</kbd> | Scroll directly to top / bottom of form |
+| <kbd>e</kbd> | Extract & fill metadata from `.eml` email announcement in directory |
+| <kbd>u</kbd> | Fetch & fill metadata from Announcement URL |
 | <kbd>Space</kbd> (on Privacy) | Cycle YouTube privacy (`unlisted` ↔ `public` ↔ `private`) |
 | <kbd>Ctrl+A</kbd> / <kbd>r</kbd> | Regenerate natural chapters with AI (analyzes kept speech) |
-| <kbd>Esc</kbd> (when not editing) | Return to Cut Review screen (automatically saves metadata) |
+| <kbd>PgDn</kbd> / <kbd>PgUp</kbd> | Page scroll form viewport down / up |
+| <kbd>Home</kbd> / <kbd>End</kbd> | Scroll directly to top / bottom of form |
+| <kbd>Esc</kbd> (when not editing) | Return to Cut Review screen (all edits are auto-saved to `talk_meta.json`) |
 | <kbd>Ctrl+R</kbd> / <kbd>c</kbd> | Advance to Export & Render tab |
 
 ---
@@ -198,16 +228,30 @@ talk_cut --upload --channel seminar examples/26_09_08/
 
 ### [5] YouTube Publish & Verification Screen
 
+#### Standard View
+
 | Key | Action |
 |---|---|
-| <kbd>u</kbd> / <kbd>Enter</kbd> | Start resumable video upload, captions sync, and YouTube verification |
+| <kbd>u</kbd> / <kbd>Enter</kbd> (before upload) | Start resumable video upload, captions sync, and playlist sync |
+| <kbd>d</kbd> / <kbd>Enter</kbd> (when uploaded) | Update details on YouTube (title, description, chapters, tags, privacy, playlists) |
+| <kbd>p</kbd> | Open Interactive Playlist Picker overlay |
 | <kbd>c</kbd> (before upload) | Cycle through configured YouTube channels (`default`, `seminar`, etc.) |
 | <kbd>o</kbd> (when published) | Open verified short URL (`https://youtu.be/<id>`) in default web browser |
 | <kbd>c</kbd> / <kbd>y</kbd> (when published) | Copy verified short URL to system clipboard (`wl-copy` / `xclip`) |
-| <kbd>p</kbd> | Preview local cut video in `ffplay` |
+| <kbd>u</kbd> (when published) | Force re-upload video |
+| <kbd>p</kbd> (before upload) | Preview local cut video in `ffplay` |
 | <kbd>r</kbd> | Retry upload or jump to render screen if video is not rendered |
 | <kbd>Esc</kbd> | Return to Cut Review screen |
 | <kbd>q</kbd> | Exit `talk_cut` |
+
+#### Playlist Picker Overlay (<kbd>p</kbd>)
+
+| Key | Action |
+|---|---|
+| <kbd>↓</kbd> / <kbd>↑</kbd> (or <kbd>j</kbd>/<kbd>k</kbd>) | Navigate channel playlists |
+| <kbd>Space</kbd> / <kbd>Enter</kbd> / <kbd>x</kbd> | Toggle talk playlist membership (immediately calls YouTube API if uploaded) |
+| <kbd>d</kbd> | Designate selected playlist as channel default in `~/.config/talk_cut/config.json` |
+| <kbd>Esc</kbd> / <kbd>p</kbd> | Close playlist picker overlay |
 
 ---
 
@@ -256,6 +300,43 @@ talk_cut --upload --channel seminar recordings/2026-09-08/
 3. Compute and format chapter markers.
 4. Upload the video using resumable uploads with title, abstract, tags, and chapter markers.
 5. Upload and synchronize the `.vtt` subtitle file as an English closed-caption track.
+6. Synchronize playlist memberships (including default channel playlist).
+
+### 4. Updating Details on Already-Uploaded Talks
+If you have already uploaded a talk to YouTube and need to update its title, description (with adjusted chapters and seminar URL), tags, privacy, or playlist assignments, run:
+
+```bash
+# Preview changes and verify durations:
+talk_cut youtube update --dry-run recordings/2026-09-08/
+
+# Synchronize updates to YouTube:
+talk_cut youtube update --channel seminar recordings/2026-09-08/
+```
+
+**Safety Protection**: `talk_cut youtube update` automatically queries YouTube's `videos.list` endpoint to verify that the video ID exists, retrieves its duration, and compares it against the local cut video (`_cut.mp4`). If the durations differ by more than &plusmn;1 second, the command aborts to prevent updating the wrong video.
+
+### 5. Managing YouTube Playlists
+Manage playlists from the CLI or within the TUI:
+
+```bash
+# List all playlists owned by the authenticated channel:
+talk_cut youtube playlist list --channel seminar
+
+# Create a new playlist and optionally set it as default:
+talk_cut youtube playlist create "Algorithms Seminar 2026" --description "Fall 2026 talks" --default
+
+# Designate a default playlist for future uploads:
+talk_cut youtube playlist set-default "Algorithms Seminar 2026"
+
+# Add an uploaded talk (by folder or video ID) to a playlist:
+talk_cut youtube playlist add "Algorithms Seminar 2026" recordings/2026-09-08/
+talk_cut youtube playlist add "Algorithms Seminar 2026" dQw4w9WgXcQ
+
+# Remove a talk from a playlist:
+talk_cut youtube playlist remove "Algorithms Seminar 2026" recordings/2026-09-08/
+```
+
+**Multi-Playlist Support**: A talk can belong to multiple playlists. All assigned playlists are tracked in `talk_meta.json` under `"playlists": [{"id": "...", "title": "..."}]` and synchronized during upload, update, or when toggled in the TUI (<kbd>p</kbd>).
 
 ---
 
@@ -271,6 +352,7 @@ Configuration is stored in `~/.config/talk_cut/config.json`:
   "default_privacy": "public",
   "preferred_layout": "slides",
   "default_channel": "seminar",
+  "default_playlist": "PLeTNkk9BjmVQxxxxxxx",
   "channels": {
     "seminar": "~/.config/auth/youtube_seminar.json",
     "personal": "~/.config/auth/youtube_personal.json"
@@ -288,6 +370,7 @@ Configuration is stored in `~/.config/talk_cut/config.json`:
 | `default_privacy` | string | Default YouTube video privacy: `unlisted`, `public`, or `private` |
 | `preferred_layout` | string | Default Zoom video layout: `slides`, `clean`, `speaker`, `gallery` |
 | `default_channel` | string | Default channel profile when `--channel` is omitted |
+| `default_playlist` | string | Default YouTube playlist ID assigned to new talks |
 | `channels` | map | Channel profile name to OAuth token path mappings |
 
 ### Environment Variables
@@ -300,6 +383,7 @@ Configuration is stored in `~/.config/talk_cut/config.json`:
 | `TALK_CUT_PLAYER` | Force a specific video preview player (`mpv`, `vlc`, `ffplay`) |
 | `TALK_CUT_YOUTUBE_SECRETS` | Override path to Google client secrets JSON |
 | `TALK_CUT_YOUTUBE_TOKEN` | Override path to OAuth token file |
+| `TALK_CUT_DEFAULT_PLAYLIST` | Override default YouTube playlist ID |
 
 ---
 
@@ -313,7 +397,7 @@ Running `talk_cut` generates the following files in the recording directory:
 | `<talk>_cut.vtt` | Synchronized, retimed WebVTT subtitle transcript |
 | `<talk>_chapters.txt` | YouTube-formatted chapter descriptions (guaranteed `00:00` start) |
 | `talk_cuts.json` | Persistent cut intervals database (auto-loaded on re-runs) |
-| `talk_meta.json` | Talk metadata cache (title, speaker, abstract, tags, URL) |
+| `talk_meta.json` | Talk metadata cache (title, speaker, abstract, tags, URL, YouTube ID, short URL, playlists) |
 
 ---
 
@@ -322,6 +406,8 @@ Running `talk_cut` generates the following files in the recording directory:
 ```text
 Usage:
   talk_cut [options] <recording-directory> [announcement-url]
+  talk_cut youtube update [options] <recording-directory>
+  talk_cut youtube playlist <list|create|set-default|add|remove> [options]
   talk_cut youtube setup [-H]            Interactive guided setup (-H for detailed guide)
   talk_cut youtube status                Inspect configured YouTube channels and tokens
   talk_cut auth [options] [secrets.json] Direct OAuth browser authorization
@@ -330,10 +416,12 @@ Options:
   -o, --output <path>    Custom output destination for sliced video
   -u, --url <url>        Seminar announcement URL (extracts speaker, title, abstract)
   --meta-only            Fetch talk metadata from URL, save talk_meta.json, and exit
+  --update-youtube       Update talk details on YouTube for an already uploaded talk
+  --playlist <name|id>   Add video to specified YouTube playlist
   --layout <type>        Preferred layout: slides (default), clean, speaker, gallery
   --no-ai                Skip AI LLM cut detection
   --re-detect            Force re-running AI cut detection even if talk_cuts.json exists
-  --dry-run              Analyze and print cut plan without opening TUI
+  --dry-run              Analyze and print cut plan without opening TUI or modifying YouTube
   --upload               Upload cut video to YouTube upon completion
   --channel <name>       Target YouTube channel (stores/loads ~/.config/auth/youtube_<channel>.json)
   --key-file <path>      Path to OpenRouter API key file

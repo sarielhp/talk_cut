@@ -17,6 +17,7 @@ import (
 	"talk_cut/internal/bundle"
 	"talk_cut/internal/config"
 	"talk_cut/internal/cutter"
+	"talk_cut/internal/eml"
 	"talk_cut/internal/metadata"
 	"talk_cut/internal/model"
 	"talk_cut/internal/ui"
@@ -31,20 +32,22 @@ var rawVersion string
 var Version = strings.TrimSpace(rawVersion)
 
 type cliOptions struct {
-	dir         string
-	output      string
-	url         string
-	layout      string
-	noAI        bool
-	dryRun      bool
-	metaOnly    bool
-	upload      bool
-	reDetect    bool
-	channel     string
-	keyFile     string
-	model       string
-	showVersion bool
-	showHelp    bool
+	dir           string
+	output        string
+	url           string
+	layout        string
+	noAI          bool
+	dryRun        bool
+	metaOnly      bool
+	upload        bool
+	reDetect      bool
+	updateYouTube bool
+	channel       string
+	playlist      string
+	keyFile       string
+	model         string
+	showVersion   bool
+	showHelp      bool
 }
 
 func main() {
@@ -95,6 +98,16 @@ func run(args []string) error {
 		}
 		applyConfigOverrides(&cfg, opts)
 		return runUploadPipeline(ctx, opts, cfg)
+	}
+
+	if opts.updateYouTube {
+		ctx := context.Background()
+		cfg, cfgErr := config.LoadConfig()
+		if cfgErr != nil {
+			return fmt.Errorf("loading config: %w", cfgErr)
+		}
+		applyConfigOverrides(&cfg, opts)
+		return runYouTubeUpdate(ctx, opts, cfg)
 	}
 
 	return executePipeline(opts)
@@ -156,6 +169,10 @@ func runYouTube(args []string) error {
 		return runAuth(args[1:])
 	case "status":
 		return runYouTubeStatus(args[1:])
+	case "update":
+		return runYouTubeUpdateCmd(args[1:])
+	case "playlist":
+		return runYouTubePlaylist(args[1:])
 	case "-H", "--guide":
 		youtube.PrintDetailedSetupGuide(os.Stdout)
 		return nil
@@ -225,12 +242,71 @@ func runYouTubeStatus(args []string) error {
 	return youtube.RunYouTubeStatus(os.Stdout, cfg)
 }
 
+// runYouTubeUpdateCmd handles the 'talk_cut youtube update [options] <recording-directory>' subcommand.
+func runYouTubeUpdateCmd(args []string) error {
+	fs := flag.NewFlagSet("talk_cut youtube update", flag.ContinueOnError)
+	var channel, output string
+	var dryRun, showHelp bool
+
+	fs.StringVar(&channel, "channel", "", "Target YouTube channel profile name")
+	fs.StringVar(&output, "output", "", "Path to cut video")
+	fs.StringVar(&output, "o", "", "Path to cut video")
+	fs.BoolVar(&dryRun, "dry-run", false, "Verify video existence and duration without modifying YouTube")
+	fs.BoolVar(&showHelp, "h", false, "Show help")
+	fs.BoolVar(&showHelp, "help", false, "Show help")
+
+	if err := fs.Parse(args); err != nil {
+		if errors.Is(err, flag.ErrHelp) {
+			return nil
+		}
+		return err
+	}
+
+	if showHelp || fs.NArg() == 0 {
+		printYouTubeUpdateUsage()
+		return nil
+	}
+
+	dir := fs.Arg(0)
+	opts := &cliOptions{
+		dir:           dir,
+		output:        output,
+		channel:       channel,
+		dryRun:        dryRun,
+		updateYouTube: true,
+	}
+
+	cfg, err := config.LoadConfig()
+	if err != nil {
+		return fmt.Errorf("loading config: %w", err)
+	}
+	applyConfigOverrides(&cfg, opts)
+
+	return runYouTubeUpdate(context.Background(), opts, cfg)
+}
+
+// printYouTubeUpdateUsage outputs CLI usage for the youtube update command.
+func printYouTubeUpdateUsage() {
+	fmt.Println("Usage: talk_cut youtube update [options] <recording-directory>")
+	fmt.Println("\nOptions:")
+	fmt.Println("  --channel <name>       Target YouTube channel profile name")
+	fmt.Println("  -o, --output <path>    Path to cut video")
+	fmt.Println("  --dry-run              Verify video existence and duration without modifying YouTube")
+	fmt.Println("  -h, --help             Show this help screen")
+}
+
 // printYouTubeUsage outputs CLI usage for the youtube subcommand group.
 func printYouTubeUsage() {
 	fmt.Println("Usage:")
-	fmt.Println("  talk_cut youtube setup [-H]      Interactive guided YouTube setup (-H for detailed guide)")
-	fmt.Println("  talk_cut youtube auth [options]  Direct OAuth browser authorization")
-	fmt.Println("  talk_cut youtube status          Inspect configured YouTube channels and tokens")
+	fmt.Println("  talk_cut youtube update [options] <recording-directory>  Update talk details on YouTube")
+	fmt.Println("  talk_cut youtube playlist list [options]                 List channel playlists")
+	fmt.Println("  talk_cut youtube playlist create [options] <title>       Create a new playlist on YouTube")
+	fmt.Println("  talk_cut youtube playlist set-default <id|title>         Set default playlist in config")
+	fmt.Println("  talk_cut youtube playlist add <playlist> <dir|id>        Add video to a playlist")
+	fmt.Println("  talk_cut youtube playlist remove <playlist> <dir|id>     Remove video from a playlist")
+	fmt.Println("  talk_cut youtube setup [-H]                              Interactive guided YouTube setup (-H for detailed guide)")
+	fmt.Println("  talk_cut youtube auth [options]                          Direct OAuth browser authorization")
+	fmt.Println("  talk_cut youtube status                                  Inspect configured YouTube channels and tokens")
 	fmt.Println("\nRun 'talk_cut youtube setup -H' for the full step-by-step setup guide.")
 }
 
@@ -267,7 +343,11 @@ func parseCLIFlags(args []string) (*cliOptions, error) {
 	fs.BoolVar(&opts.metaOnly, "meta-only", false, "Fetch talk metadata from URL, save talk_meta.json, and exit")
 	fs.BoolVar(&opts.upload, "upload", false, "Upload cut video to YouTube upon completion")
 	fs.BoolVar(&opts.reDetect, "re-detect", false, "Force re-running AI cut detection even if talk_cuts.json exists")
+	fs.BoolVar(&opts.updateYouTube, "update-youtube", false, "Update talk details on YouTube for an already uploaded talk")
+	fs.BoolVar(&opts.updateYouTube, "update-info", false, "Alias for --update-youtube")
+	fs.BoolVar(&opts.updateYouTube, "update-details", false, "Alias for --update-youtube")
 	fs.StringVar(&opts.channel, "channel", "", "Target YouTube channel profile name")
+	fs.StringVar(&opts.playlist, "playlist", "", "Target YouTube playlist ID or title")
 	fs.StringVar(&opts.keyFile, "key-file", "", "Custom path to auth key file")
 	fs.StringVar(&opts.model, "model", "", "OpenRouter model name")
 	fs.BoolVar(&opts.showVersion, "v", false, "Print version and exit")
@@ -324,7 +404,7 @@ func executePipeline(opts *cliOptions) error {
 			fmt.Printf("Loaded %d saved cut intervals from %s\n", len(savedCuts), cutsPath)
 		}
 	} else if !opts.noAI {
-		cues = runAICutDetection(ctx, opts.dir, cfg, cues, &talkMeta)
+		cues = runAICutDetection(ctx, cfg, cues)
 		_ = model.SaveCutsFile(opts.dir, model.BuildCutIntervals(cues))
 	}
 
@@ -360,15 +440,22 @@ func applyConfigOverrides(cfg *config.Config, opts *cliOptions) {
 	}
 }
 
-// runMetaOnly fetches metadata from URL and saves talk_meta.json without launching TUI.
+// runMetaOnly fetches metadata from URL or announcement email and saves talk_meta.json without launching TUI.
 func runMetaOnly(ctx context.Context, opts *cliOptions, cfg config.Config) error {
 	info, err := os.Stat(opts.dir)
 	if err != nil || !info.IsDir() {
 		return fmt.Errorf("%q is not a valid directory", opts.dir)
 	}
-	if opts.url == "" && !model.HasSavedMetadata(opts.dir) {
-		return fmt.Errorf("no URL provided to update metadata (usage: talk_cut --meta-only <dir> <url>)")
+
+	emlPath, emlErr := eml.FindUniqueEML(opts.dir)
+	if emlErr != nil {
+		return emlErr
 	}
+
+	if opts.url == "" && emlPath == "" && !model.HasSavedMetadata(opts.dir) {
+		return fmt.Errorf("no URL or unique .eml file found to update metadata (usage: talk_cut --meta-only <dir> [url])")
+	}
+
 	meta := initialMetadata(ctx, opts, cfg)
 	fmt.Printf("✔ Talk metadata in %s is updated\n", opts.dir)
 	if meta.Title != "" {
@@ -387,7 +474,7 @@ func runMetaOnly(ctx context.Context, opts *cliOptions, cfg config.Config) error
 	return nil
 }
 
-// initialMetadata constructs baseline metadata, optionally scraping the seminar web page.
+// initialMetadata constructs baseline metadata, optionally scraping web page or parsing announcement email.
 func initialMetadata(ctx context.Context, opts *cliOptions, cfg config.Config) model.TalkMetadata {
 	meta := model.TalkMetadata{
 		Title:   filepath.Base(opts.dir),
@@ -404,29 +491,132 @@ func initialMetadata(ctx context.Context, opts *cliOptions, cfg config.Config) m
 
 	if opts.url != "" {
 		meta.URL = opts.url
-		info, err := metadata.FetchTalkInfo(ctx, opts.url)
-		if err == nil {
-			applyTalkInfoToMetadata(&meta, info)
-			fmt.Printf("✔ Fetched talk metadata from %s\n", opts.url)
-			if meta.Speaker != "" {
-				fmt.Printf("  Speaker: %s", meta.Speaker)
-				if meta.Affiliation != "" {
-					fmt.Printf(" (%s)", meta.Affiliation)
-				}
-				fmt.Println()
-			}
-			if meta.Title != "" {
-				fmt.Printf("  Title:   %s\n", meta.Title)
-			}
-		} else {
-			fmt.Fprintf(os.Stderr, "warning: fetching %s: %v\n", opts.url, err)
-		}
-		if saveErr := model.SaveMetaFile(opts.dir, meta); saveErr == nil {
-			metaPath := filepath.Join(opts.dir, model.MetaFileName)
-			fmt.Printf("  Saved talk metadata to %s\n", metaPath)
-		}
 	}
+
+	if opts.metaOnly {
+		populateMetaOnly(ctx, opts, cfg, &meta)
+		_ = model.SaveMetaFile(opts.dir, meta)
+	}
+
 	return meta
+}
+
+// populateMetaOnly handles CLI metadata generation from URL or EML when --meta-only is passed.
+func populateMetaOnly(ctx context.Context, opts *cliOptions, cfg config.Config, meta *model.TalkMetadata) {
+	if opts.url != "" {
+		info, err := metadata.FetchTalkInfo(ctx, opts.url)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "warning: fetching %s: %v\n", opts.url, err)
+			return
+		}
+		applyTalkInfoToMetadata(meta, info)
+		fmt.Printf("✔ Fetched talk metadata from %s\n", opts.url)
+		discoverChannelUpload(ctx, opts, cfg, meta)
+		printMetaSummary(*meta)
+		return
+	}
+
+	emlPath, emlErr := eml.FindUniqueEML(opts.dir)
+	if emlErr != nil {
+		fmt.Fprintf(os.Stderr, "warning: checking announcement email: %v\n", emlErr)
+		return
+	}
+	if emlPath != "" && !opts.noAI {
+		if err := extractMetadataFromEML(ctx, emlPath, cfg, meta); err != nil {
+			fmt.Fprintf(os.Stderr, "warning: extracting metadata from %s: %v\n", emlPath, err)
+			return
+		}
+		fmt.Printf("✔ Extracted talk metadata from email: %s\n", filepath.Base(emlPath))
+	}
+
+	discoverChannelUpload(ctx, opts, cfg, meta)
+	printMetaSummary(*meta)
+}
+
+// discoverChannelUpload checks if a video for this talk is already uploaded on the YouTube channel.
+func discoverChannelUpload(ctx context.Context, opts *cliOptions, cfg config.Config, meta *model.TalkMetadata) {
+	channel := opts.channel
+	if channel == "" {
+		channel = cfg.DefaultChannel
+	}
+	if !cfg.HasValidChannelToken(channel) || (meta.YouTubeID != "" && meta.YouTubeURL != "") {
+		return
+	}
+	client, err := youtube.GetAuthenticatedClient(ctx, cfg, channel)
+	if err != nil {
+		return
+	}
+	ver, err := youtube.FindChannelVideoForTalk(ctx, client, meta.Title, filepath.Base(opts.dir))
+	if err == nil && ver != nil && ver.VideoID != "" {
+		meta.YouTubeID = ver.VideoID
+		meta.YouTubeURL = ver.ShortURL
+		if meta.YouTubeURL == "" {
+			meta.YouTubeURL = fmt.Sprintf("https://youtu.be/%s", ver.VideoID)
+		}
+		fmt.Printf("✔ Discovered existing YouTube upload: %s\n", meta.YouTubeURL)
+	}
+}
+
+// printMetaSummary prints formatted speaker and title summary to stdout.
+func printMetaSummary(meta model.TalkMetadata) {
+	if meta.Title != "" {
+		fmt.Printf("  Title:   %s\n", meta.Title)
+	}
+	if meta.Speaker != "" {
+		fmt.Printf("  Speaker: %s", meta.Speaker)
+		if meta.Affiliation != "" {
+			fmt.Printf(" (%s)", meta.Affiliation)
+		}
+		fmt.Println()
+	}
+	if meta.YouTubeURL != "" {
+		fmt.Printf("  YouTube: %s\n", meta.YouTubeURL)
+	} else if meta.YouTubeID != "" {
+		fmt.Printf("  YouTube: https://youtu.be/%s\n", meta.YouTubeID)
+	}
+}
+
+// hasEmptyMetadataFields returns true if key talk metadata fields (speaker, abstract, and custom title) are empty.
+func hasEmptyMetadataFields(meta model.TalkMetadata, dir string) bool {
+	titleEmpty := strings.TrimSpace(meta.Title) == "" || meta.Title == filepath.Base(dir)
+	speakerEmpty := strings.TrimSpace(meta.Speaker) == ""
+	abstractEmpty := strings.TrimSpace(meta.Abstract) == ""
+	return titleEmpty && speakerEmpty && abstractEmpty
+}
+
+// extractMetadataFromEML parses an announcement email and queries AI to extract talk details.
+func extractMetadataFromEML(ctx context.Context, emlPath string, cfg config.Config, meta *model.TalkMetadata) error {
+	parsed, err := eml.ParseEMLFile(emlPath)
+	if err != nil {
+		return fmt.Errorf("parsing email %q: %w", emlPath, err)
+	}
+
+	client, err := ai.NewClient(cfg)
+	if err != nil {
+		return fmt.Errorf("initializing AI client: %w", err)
+	}
+
+	extracted, err := ai.ExtractTalkMetadataFromEmail(ctx, client, parsed.Subject, parsed.Body, nil)
+	if err != nil {
+		return fmt.Errorf("extracting metadata via AI: %w", err)
+	}
+
+	if extracted.Title != "" {
+		meta.Title = extracted.Title
+	}
+	if extracted.Speaker != "" {
+		meta.Speaker = extracted.Speaker
+	}
+	if extracted.Affiliation != "" {
+		meta.Affiliation = extracted.Affiliation
+	}
+	if extracted.Abstract != "" {
+		meta.Abstract = extracted.Abstract
+	}
+	if len(extracted.Tags) > 0 {
+		meta.Tags = extracted.Tags
+	}
+	return nil
 }
 
 // applyTalkInfoToMetadata applies extracted web info onto TalkMetadata.
@@ -448,8 +638,8 @@ func applyTalkInfoToMetadata(meta *model.TalkMetadata, info metadata.TalkPageInf
 	}
 }
 
-// runAICutDetection queries OpenRouter to detect candidate cuts and enrich metadata.
-func runAICutDetection(ctx context.Context, dir string, cfg config.Config, cues []model.SubtitleCue, meta *model.TalkMetadata) []model.SubtitleCue {
+// runAICutDetection queries OpenRouter to detect candidate cuts from transcript cues.
+func runAICutDetection(ctx context.Context, cfg config.Config, cues []model.SubtitleCue) []model.SubtitleCue {
 	client, err := ai.NewClient(cfg)
 	if err != nil {
 		return cues
@@ -458,30 +648,6 @@ func runAICutDetection(ctx context.Context, dir string, cfg config.Config, cues 
 	cuts, cutErr := ai.DetectCuts(ctx, client, cues)
 	if cutErr == nil {
 		model.ApplyCutsToCues(cues, cuts)
-	}
-
-	if meta.Speaker == "" {
-		if aiMeta, metaErr := ai.ExtractTalkMetadata(ctx, client, meta.Abstract, cues); metaErr == nil {
-			if aiMeta.Title != "" && meta.Title == "" {
-				meta.Title = aiMeta.Title
-			}
-			if aiMeta.Speaker != "" {
-				meta.Speaker = aiMeta.Speaker
-			}
-			if aiMeta.Affiliation != "" {
-				meta.Affiliation = aiMeta.Affiliation
-			}
-			if aiMeta.Abstract != "" && meta.Abstract == "" {
-				meta.Abstract = aiMeta.Abstract
-			}
-			if len(aiMeta.Tags) > 0 && len(meta.Tags) == 0 {
-				meta.Tags = aiMeta.Tags
-			}
-			if len(aiMeta.Chapters) > 0 {
-				meta.Chapters = aiMeta.Chapters
-			}
-			_ = model.SaveMetaFile(dir, *meta)
-		}
 	}
 
 	return cues
@@ -569,6 +735,8 @@ func printHelp() {
 	fmt.Printf("talk_cut v%s - Interactive Talk Trimmer & YouTube Publisher\n\n", Version)
 	fmt.Println("Usage:")
 	fmt.Println("  talk_cut [options] <recording-directory> [announcement-url]")
+	fmt.Println("  talk_cut youtube update [options] <recording-directory>")
+	fmt.Println("  talk_cut youtube playlist <list|create|set-default|add|remove> [options]")
 	fmt.Println("  talk_cut youtube setup [-H]            Interactive guided setup (-H for detailed guide)")
 	fmt.Println("  talk_cut youtube status                Inspect configured YouTube channels and tokens")
 	fmt.Println("  talk_cut auth [options] [secrets.json] Direct OAuth browser authorization")
@@ -576,10 +744,12 @@ func printHelp() {
 	fmt.Println("  -o, --output <path>    Custom output destination for sliced video")
 	fmt.Println("  -u, --url <url>        Seminar announcement URL (extracts speaker, title, abstract)")
 	fmt.Println("  --meta-only            Fetch talk metadata from URL, save talk_meta.json, and exit")
+	fmt.Println("  --update-youtube       Update talk details on YouTube for an already uploaded talk")
+	fmt.Println("  --playlist <name|id>   Add video to specified YouTube playlist")
 	fmt.Println("  --layout <type>        Preferred layout: slides (default), clean, speaker, gallery")
 	fmt.Println("  --no-ai                Skip AI LLM cut and chapter detection")
 	fmt.Println("  --re-detect            Force re-running AI cut & chapter detection even if saved files exist")
-	fmt.Println("  --dry-run              Analyze and print cut plan without opening TUI")
+	fmt.Println("  --dry-run              Analyze and print plan without opening TUI or modifying YouTube")
 	fmt.Println("  --upload               Upload cut video to YouTube upon completion")
 	fmt.Println("  --channel <name>       Target YouTube channel (stores/loads ~/.config/auth/youtube_<channel>.json)")
 	fmt.Println("  --key-file <path>      Path to OpenRouter API key file (default: ~/.config/auth/openrouter_api_key)")

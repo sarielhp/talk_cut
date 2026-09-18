@@ -40,8 +40,8 @@ func runUploadPipeline(ctx context.Context, opts *cliOptions, cfg config.Config)
 	chaptersPath := outBase + "_chapters.txt"
 	vttPath := outBase + ".vtt"
 
-	if err := renderVideoIfNeeded(ctx, b.PrimaryVideo, outPath, cuts, opts.dir); err != nil {
-		return err
+	if renderErr := renderVideoIfNeeded(ctx, b.PrimaryVideo, outPath, cuts, opts.dir); renderErr != nil {
+		return renderErr
 	}
 
 	writeChaptersFile(chaptersPath, talkMeta.Chapters)
@@ -54,7 +54,29 @@ func runUploadPipeline(ctx context.Context, opts *cliOptions, cfg config.Config)
 		return fmt.Errorf("uploading video to YouTube: %w", err)
 	}
 
+	talkMeta.YouTubeID = result.VideoID
+	_ = model.SaveMetaFile(opts.dir, talkMeta)
+
 	performCaptionUpload(ctx, client, result.VideoID, vttPath)
+
+	var targetPlaylists []string
+	if opts.playlist != "" {
+		for _, p := range strings.Split(opts.playlist, ",") {
+			if trimmed := strings.TrimSpace(p); trimmed != "" {
+				targetPlaylists = append(targetPlaylists, trimmed)
+			}
+		}
+	}
+	for _, pl := range talkMeta.AllPlaylists() {
+		targetPlaylists = append(targetPlaylists, pl.ID)
+	}
+	if len(targetPlaylists) == 0 && cfg.DefaultPlaylist != "" {
+		targetPlaylists = append(targetPlaylists, cfg.DefaultPlaylist)
+	}
+	if len(targetPlaylists) > 0 {
+		syncVideoPlaylists(ctx, client, targetPlaylists, result.VideoID, &talkMeta, opts.dir)
+	}
+
 	printUploadSuccess(talkMeta, channel, result.VideoURL, len(talkMeta.Chapters))
 	return nil
 }
@@ -109,7 +131,7 @@ func prepareUploadMetadataAndCuts(ctx context.Context, opts *cliOptions, cfg con
 			fmt.Printf("Loaded %d saved cut intervals from %s\n", len(savedCuts), filepath.Join(opts.dir, model.CutsFileName))
 		}
 	} else if !opts.noAI {
-		cues = runAICutDetection(ctx, opts.dir, cfg, cues, &talkMeta)
+		cues = runAICutDetection(ctx, cfg, cues)
 		_ = model.SaveCutsFile(opts.dir, model.BuildCutIntervals(cues))
 	}
 
@@ -228,6 +250,16 @@ func printUploadSuccess(meta model.TalkMetadata, channel, url string, chaptersCo
 	fmt.Printf("  Channel:    %s\n", channel)
 	fmt.Printf("  Privacy:    %s\n", strings.ToLower(meta.Privacy))
 	fmt.Printf("  Video URL:  %s\n", url)
+	pls := meta.AllPlaylists()
+	if len(pls) == 1 {
+		fmt.Printf("  Playlist:   %s\n", pls[0].Title)
+	} else if len(pls) > 1 {
+		var titles []string
+		for _, pl := range pls {
+			titles = append(titles, pl.Title)
+		}
+		fmt.Printf("  Playlists:  %s\n", strings.Join(titles, ", "))
+	}
 	fmt.Printf("  Chapters:   %d markers synchronized\n", chaptersCount)
 	fmt.Println("================================================================================")
 }

@@ -141,3 +141,59 @@ func TestExtractTalkMetadataMock(t *testing.T) {
 		t.Fatalf("expected 1 chapter, got %d", len(meta.Chapters))
 	}
 }
+
+func TestExtractTalkMetadataFromEmailMock(t *testing.T) {
+	mockResponse := chatResponse{
+		Choices: []struct {
+			Message struct {
+				Content string `json:"content"`
+			} `json:"message"`
+		}{
+			{
+				Message: struct {
+					Content string `json:"content"`
+				}{
+					Content: `{
+						"title": "Oriented Spanners in Metric Spaces",
+						"speaker": "Michiel Smid",
+						"affiliation": "Carleton University",
+						"abstract": "A t-spanner of a finite metric space is an undirected graph.",
+						"tags": ["spanners", "computational geometry"]
+					}`,
+				},
+			},
+		},
+	}
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(mockResponse)
+	}))
+	defer server.Close()
+
+	t.Setenv("OPENROUTER_API_KEY", "mock-key")
+	cfg := config.Config{
+		BaseURL: server.URL,
+		Model:   "mock-model",
+	}
+
+	client, err := NewClient(cfg)
+	if err != nil {
+		t.Fatalf("NewClient failed: %v", err)
+	}
+
+	meta, err := ExtractTalkMetadataFromEmail(context.Background(), client, "Seminar Announcement", "Speaker: Michiel Smid\nTitle: Oriented Spanners", nil)
+	if err != nil {
+		t.Fatalf("ExtractTalkMetadataFromEmail failed: %v", err)
+	}
+
+	if meta.Title != "Oriented Spanners in Metric Spaces" {
+		t.Errorf("title mismatch: %q", meta.Title)
+	}
+	if meta.Speaker != "Michiel Smid" {
+		t.Errorf("speaker mismatch: %q", meta.Speaker)
+	}
+	if meta.Affiliation != "Carleton University" {
+		t.Errorf("affiliation mismatch: %q", meta.Affiliation)
+	}
+}

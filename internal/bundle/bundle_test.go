@@ -63,4 +63,19 @@ func TestDiscoverBundleSynthetic(t *testing.T) {
 	if filepath.Base(b.PrimaryVideo) != "talk_1920x1080.mp4" {
 		t.Errorf("unexpected primary video: %q", b.PrimaryVideo)
 	}
+
+	// Add an EML file and verify detection
+	emlPath := filepath.Join(tempDir, "announcement.eml")
+	err = os.WriteFile(emlPath, []byte("From: speaker\n"), 0o644)
+	if err != nil {
+		t.Fatalf("failed writing eml: %v", err)
+	}
+
+	bWithEml, err := DiscoverBundle(tempDir, "slides")
+	if err != nil {
+		t.Fatalf("DiscoverBundle with EML failed: %v", err)
+	}
+	if bWithEml.EmlPath != emlPath {
+		t.Errorf("expected EmlPath %q, got %q", emlPath, bWithEml.EmlPath)
+	}
 }
