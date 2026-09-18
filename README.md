@@ -17,7 +17,7 @@ It leverages an LLM (via OpenRouter, e.g. Gemini 2.5 Flash Lite) to automaticall
 ```mermaid
 flowchart TD
     A["Zoom Recording Bundle\n(MP4, VTT Transcript, Chat)"] --> B["Ingestion & Feed Selection\n(--layout slides | clean | speaker | gallery)"]
-    U["Seminar Announcement URL\n(talk_cal / -u <url>)"] --> M["Web Metadata Extractor\n(Speaker, Affiliation, Title, Abstract)"]
+    U["Seminar Announcement URL\n(-u <url>)"] --> M["Web Metadata Extractor\n(Speaker, Affiliation, Title, Abstract)"]
     B --> C["AI Candidate Cut Detection\n(OpenRouter / Gemini 2.5 Flash Lite)"]
     M --> C
     C --> D["Interactive Terminal UI (Bubble Tea)\n• Cut Reviewer & Cue Toggles\n• Live Video Preview (mpv / vlc / ffplay)\n• Metadata Editor & Live Chapters Preview"]
@@ -36,7 +36,7 @@ flowchart TD
 - **Smart Presentation Layout Selection**: Zoom bundles often record multiple video perspectives. Choose the optimal layout using `--layout` (`slides` with speaker thumbnail, `clean` slides without thumbnail, `speaker`, or `gallery`).
 - **AI Cut & Preamble Detection**: Analyzes the WebVTT transcript using token-optimized sampling with OpenRouter (Gemini 2.5 Flash Lite by default) to identify intro banter, microphone tests, slide transitions, dead pauses, and trailing audience Q&A.
 - **AI Natural Chapter Detection**: Automatically detects topical chapter shifts across the talk transcript (problem statement, theorems, algorithms, evaluations, conclusions), persisting markers in `talk_meta.json` and dynamically adjusting timestamps post-cut.
-- **Web Metadata Scraping & `talk_cal`**: Supply a seminar announcement web page (`-u <url>` or via the companion symlink `talk_cal <dir> <url>`) to automatically scrape the speaker's name, institutional affiliation, talk title, abstract, and tags.
+- **Web Metadata Scraping**: Supply a seminar announcement web page (`-u <url>` or `talk_cut --meta-only <dir> <url>`) to automatically scrape the speaker's name, institutional affiliation, talk title, abstract, and tags.
 - **True-Color Split-Pane Terminal Interface**:
   - **Cut Reviewer**: Scroll through timestamped transcript cues with visual status indicators (`[✔ KEEP]`, `[✂ CUT]`), speaker labels, and AI rationale badges.
   - **Live External Video Preview**: Press <kbd>p</kbd> on any subtitle cue to spawn an external player (`mpv`, `vlc`, `ffplay`, or `totem`) synchronized exactly to that moment.
@@ -70,12 +70,11 @@ cd talk_cut
 make install
 ```
 
-This validates all quality gates, builds the binary, and installs both `talk_cut` and the `talk_cal` symlink into `~/bin/`:
+This validates all quality gates, builds the binary, and installs `talk_cut` into `~/bin/`:
 
 ```bash
-which talk_cut talk_cal
+which talk_cut
 # ~/bin/talk_cut
-# ~/bin/talk_cal
 ```
 
 Ensure `~/bin` is included in your system `$PATH`.
@@ -105,10 +104,10 @@ Pass a seminar announcement URL to populate the speaker name, affiliation, title
 talk_cut -u "https://seminar.example.edu/talks/2026/linear-approximation" examples/26_09_08/
 ```
 
-Alternatively, use the standalone `talk_cal` command to fetch and persist metadata into `talk_meta.json` without opening the editor:
+Alternatively, use the `--meta-only` flag to fetch and persist metadata into `talk_meta.json` without opening the editor:
 
 ```bash
-talk_cal examples/26_09_08/ "https://seminar.example.edu/talks/2026/linear-approximation"
+talk_cut --meta-only examples/26_09_08/ "https://seminar.example.edu/talks/2026/linear-approximation"
 ```
 
 ### 4. Direct YouTube Upload
@@ -323,7 +322,6 @@ Running `talk_cut` generates the following files in the recording directory:
 ```text
 Usage:
   talk_cut [options] <recording-directory> [announcement-url]
-  talk_cal <recording-directory> <announcement-url>
   talk_cut youtube setup [-H]            Interactive guided setup (-H for detailed guide)
   talk_cut youtube status                Inspect configured YouTube channels and tokens
   talk_cut auth [options] [secrets.json] Direct OAuth browser authorization

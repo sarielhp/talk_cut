@@ -11,12 +11,10 @@ build: $(BIN_NAME)
 
 $(BIN_NAME): $(GO_FILES) go.mod VERSION
 	go build -o $(BIN_NAME) .
-	ln -sf $(BIN_NAME) talk_cal
 
 install: $(BIN_NAME)
 	mkdir -p ~/bin
 	cp $(BIN_NAME) ~/bin/
-	ln -sf ~/bin/$(BIN_NAME) ~/bin/talk_cal
 
 # Fast quality gate: formatting, vet, staticcheck, cognitive audit, unit tests, build
 check:

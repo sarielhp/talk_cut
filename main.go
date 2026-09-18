@@ -257,11 +257,6 @@ func parseCLIFlags(args []string) (*cliOptions, error) {
 	fs := flag.NewFlagSet("talk_cut", flag.ContinueOnError)
 	opts := &cliOptions{}
 
-	isTalkCal := len(os.Args) > 0 && (strings.HasSuffix(os.Args[0], "talk_cal") || strings.HasSuffix(os.Args[0], "talk_cal.exe"))
-	if isTalkCal {
-		opts.metaOnly = true
-	}
-
 	fs.StringVar(&opts.output, "o", "", "Output cut video path")
 	fs.StringVar(&opts.output, "output", "", "Output cut video path")
 	fs.StringVar(&opts.url, "u", "", "Seminar announcement web URL")
@@ -269,7 +264,7 @@ func parseCLIFlags(args []string) (*cliOptions, error) {
 	fs.StringVar(&opts.layout, "layout", "", "Preferred video layout (slides, clean, speaker, gallery)")
 	fs.BoolVar(&opts.noAI, "no-ai", false, "Disable OpenRouter AI cut detection")
 	fs.BoolVar(&opts.dryRun, "dry-run", false, "Analyze and print cut plan without opening TUI")
-	fs.BoolVar(&opts.metaOnly, "meta-only", opts.metaOnly, "Fetch talk metadata from URL, save talk_meta.json, and exit")
+	fs.BoolVar(&opts.metaOnly, "meta-only", false, "Fetch talk metadata from URL, save talk_meta.json, and exit")
 	fs.BoolVar(&opts.upload, "upload", false, "Upload cut video to YouTube upon completion")
 	fs.BoolVar(&opts.reDetect, "re-detect", false, "Force re-running AI cut detection even if talk_cuts.json exists")
 	fs.StringVar(&opts.channel, "channel", "", "Target YouTube channel profile name")
@@ -372,7 +367,7 @@ func runMetaOnly(ctx context.Context, opts *cliOptions, cfg config.Config) error
 		return fmt.Errorf("%q is not a valid directory", opts.dir)
 	}
 	if opts.url == "" && !model.HasSavedMetadata(opts.dir) {
-		return fmt.Errorf("no URL provided to update metadata (usage: talk_cal <dir> <url>)")
+		return fmt.Errorf("no URL provided to update metadata (usage: talk_cut --meta-only <dir> <url>)")
 	}
 	meta := initialMetadata(ctx, opts, cfg)
 	fmt.Printf("✔ Talk metadata in %s is updated\n", opts.dir)
@@ -574,7 +569,6 @@ func printHelp() {
 	fmt.Printf("talk_cut v%s - Interactive Talk Trimmer & YouTube Publisher\n\n", Version)
 	fmt.Println("Usage:")
 	fmt.Println("  talk_cut [options] <recording-directory> [announcement-url]")
-	fmt.Println("  talk_cal <recording-directory> <announcement-url>")
 	fmt.Println("  talk_cut youtube setup [-H]            Interactive guided setup (-H for detailed guide)")
 	fmt.Println("  talk_cut youtube status                Inspect configured YouTube channels and tokens")
 	fmt.Println("  talk_cut auth [options] [secrets.json] Direct OAuth browser authorization")
