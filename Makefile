@@ -9,7 +9,7 @@ all: build
 
 build: $(BIN_NAME)
 
-$(BIN_NAME): $(GO_FILES) go.mod
+$(BIN_NAME): $(GO_FILES) go.mod VERSION
 	go build -o $(BIN_NAME) .
 	ln -sf $(BIN_NAME) talk_cal
 
