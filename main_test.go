@@ -60,8 +60,12 @@ func TestRunYouTube_UsageAndStatus(t *testing.T) {
 	if err != nil {
 		t.Fatalf("run(youtube) error: %v", err)
 	}
-	if !strings.Contains(output, "talk_cut youtube setup [-H]") {
-		t.Errorf("run(youtube) output did not contain setup command: %s", output)
+	// This used to look for the literal "talk_cut youtube setup [-H]" from a
+	// hand-written usage block. clihelp generates the page from the command
+	// tree now, so what is checked is that the subcommand is listed and says
+	// what it does.
+	if !strings.Contains(output, "setup") || !strings.Contains(output, "guided setup") {
+		t.Errorf("run(youtube) output did not list the setup command: %s", output)
 	}
 
 	// Test youtube status
