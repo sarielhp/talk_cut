@@ -2,8 +2,6 @@ package main
 
 import (
 	"context"
-	"errors"
-	"flag"
 	"fmt"
 	"os"
 	"strings"
@@ -13,43 +11,8 @@ import (
 	"talk_cut/internal/youtube"
 )
 
-// runYouTubePlaylist routes playlist subcommands (list, create, add, set-default).
-func runYouTubePlaylist(args []string) error {
-	if len(args) == 0 {
-		printPlaylistHelp()
-		return nil
-	}
-
-	switch args[0] {
-	case "list", "ls":
-		return runPlaylistList(args[1:])
-	case "create", "new":
-		return runPlaylistCreate(args[1:])
-	case "set-default", "default":
-		return runPlaylistSetDefault(args[1:])
-	case "add":
-		return runPlaylistAdd(args[1:])
-	case "remove", "rm":
-		return runPlaylistRemove(args[1:])
-	case "-h", "--help", "help":
-		printPlaylistHelp()
-		return nil
-	default:
-		return fmt.Errorf("unknown playlist subcommand %q; run 'talk_cut youtube playlist --help' for usage", args[0])
-	}
-}
-
 // runPlaylistList queries and displays all playlists owned by the authenticated channel.
-func runPlaylistList(args []string) error {
-	fs := flag.NewFlagSet("talk_cut youtube playlist list", flag.ContinueOnError)
-	var channel string
-	fs.StringVar(&channel, "channel", "", "Target YouTube channel profile name")
-	if err := fs.Parse(args); err != nil {
-		if errors.Is(err, flag.ErrHelp) {
-			return nil
-		}
-		return err
-	}
+func runPlaylistListWith(channel string) error {
 
 	cfg, err := config.LoadConfig()
 	if err != nil {
@@ -89,28 +52,8 @@ func runPlaylistList(args []string) error {
 }
 
 // runPlaylistCreate creates a new playlist on YouTube and optionally sets it as default in config.
-func runPlaylistCreate(args []string) error {
-	fs := flag.NewFlagSet("talk_cut youtube playlist create", flag.ContinueOnError)
-	var title, desc, privacy, channel string
-	var makeDefault bool
+func runPlaylistCreateWith(title, desc, privacy, channel string, makeDefault bool) error {
 
-	fs.StringVar(&title, "title", "", "Playlist title")
-	fs.StringVar(&desc, "description", "", "Playlist description")
-	fs.StringVar(&desc, "desc", "", "Playlist description")
-	fs.StringVar(&privacy, "privacy", "public", "Playlist privacy (public, unlisted, private)")
-	fs.StringVar(&channel, "channel", "", "Target YouTube channel profile name")
-	fs.BoolVar(&makeDefault, "default", false, "Set as default playlist in config")
-
-	if err := fs.Parse(args); err != nil {
-		if errors.Is(err, flag.ErrHelp) {
-			return nil
-		}
-		return err
-	}
-
-	if title == "" && fs.NArg() > 0 {
-		title = fs.Arg(0)
-	}
 	if title == "" {
 		return fmt.Errorf("playlist title is required; specify --title \"<name>\" or pass as argument")
 	}
@@ -154,21 +97,7 @@ func runPlaylistCreate(args []string) error {
 }
 
 // runPlaylistSetDefault searches channel playlists and writes the chosen playlist to ~/.config/talk_cut/config.json.
-func runPlaylistSetDefault(args []string) error {
-	fs := flag.NewFlagSet("talk_cut youtube playlist set-default", flag.ContinueOnError)
-	var channel string
-	fs.StringVar(&channel, "channel", "", "Target YouTube channel profile name")
-	if err := fs.Parse(args); err != nil {
-		if errors.Is(err, flag.ErrHelp) {
-			return nil
-		}
-		return err
-	}
-
-	if fs.NArg() == 0 {
-		return fmt.Errorf("please provide a playlist ID or title: talk_cut youtube playlist set-default <id|title>")
-	}
-	target := fs.Arg(0)
+func runPlaylistSetDefaultWith(target, channel string) error {
 
 	cfg, err := config.LoadConfig()
 	if err != nil {
@@ -201,22 +130,7 @@ func runPlaylistSetDefault(args []string) error {
 }
 
 // runPlaylistAdd inserts a talk video into a playlist.
-func runPlaylistAdd(args []string) error {
-	fs := flag.NewFlagSet("talk_cut youtube playlist add", flag.ContinueOnError)
-	var channel string
-	fs.StringVar(&channel, "channel", "", "Target YouTube channel profile name")
-	if err := fs.Parse(args); err != nil {
-		if errors.Is(err, flag.ErrHelp) {
-			return nil
-		}
-		return err
-	}
-
-	if fs.NArg() < 2 {
-		return fmt.Errorf("usage: talk_cut youtube playlist add <playlist-id-or-title> <recording-dir-or-videoid>")
-	}
-	playlistTarget := fs.Arg(0)
-	videoTarget := fs.Arg(1)
+func runPlaylistAddWith(playlistTarget, videoTarget, channel string) error {
 
 	cfg, err := config.LoadConfig()
 	if err != nil {
@@ -262,22 +176,7 @@ func runPlaylistAdd(args []string) error {
 }
 
 // runPlaylistRemove removes a talk video from a playlist.
-func runPlaylistRemove(args []string) error {
-	fs := flag.NewFlagSet("talk_cut youtube playlist remove", flag.ContinueOnError)
-	var channel string
-	fs.StringVar(&channel, "channel", "", "Target YouTube channel profile name")
-	if err := fs.Parse(args); err != nil {
-		if errors.Is(err, flag.ErrHelp) {
-			return nil
-		}
-		return err
-	}
-
-	if fs.NArg() < 2 {
-		return fmt.Errorf("usage: talk_cut youtube playlist remove <playlist-id-or-title> <recording-dir-or-videoid>")
-	}
-	playlistTarget := fs.Arg(0)
-	videoTarget := fs.Arg(1)
+func runPlaylistRemoveWith(playlistTarget, videoTarget, channel string) error {
 
 	cfg, err := config.LoadConfig()
 	if err != nil {
