@@ -79,3 +79,27 @@ func TestDiscoverBundleSynthetic(t *testing.T) {
 		t.Errorf("expected EmlPath %q, got %q", emlPath, bWithEml.EmlPath)
 	}
 }
+
+func TestDiscoverBundleAllowMissingTranscript(t *testing.T) {
+	tempDir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(tempDir, "talk_1920x1080.mp4"), []byte("video"), 0o644); err != nil {
+		t.Fatalf("failed writing mp4: %v", err)
+	}
+
+	// Normal discovery fails when transcript is missing
+	if _, err := DiscoverBundle(tempDir, "slides"); err == nil {
+		t.Errorf("expected error when transcript is missing")
+	}
+
+	// DiscoverBundleWithOptions allows missing transcript
+	b, err := DiscoverBundleWithOptions(tempDir, "slides", true)
+	if err != nil {
+		t.Fatalf("DiscoverBundleWithOptions failed: %v", err)
+	}
+	if b.TranscriptPath != "" {
+		t.Errorf("expected empty TranscriptPath, got %q", b.TranscriptPath)
+	}
+	if filepath.Base(b.PrimaryVideo) != "talk_1920x1080.mp4" {
+		t.Errorf("unexpected primary video: %q", b.PrimaryVideo)
+	}
+}

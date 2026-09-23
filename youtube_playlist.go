@@ -234,18 +234,3 @@ func resolveVideoIDFromTarget(target string) (videoID string, dir string) {
 	videoID = model.ExtractYouTubeID(target)
 	return videoID, ""
 }
-
-// printPlaylistHelp outputs usage instructions for youtube playlist commands.
-func printPlaylistHelp() {
-	fmt.Println("Usage:")
-	fmt.Println("  talk_cut youtube playlist list [options]                        List channel playlists")
-	fmt.Println("  talk_cut youtube playlist create [options] <title>              Create a new playlist on YouTube")
-	fmt.Println("  talk_cut youtube playlist set-default [options] <id|title>      Set default playlist in config")
-	fmt.Println("  talk_cut youtube playlist add [options] <id|title> <dir|id>     Add video to a playlist")
-	fmt.Println("  talk_cut youtube playlist remove [options] <id|title> <dir|id>  Remove video from a playlist")
-	fmt.Println("\nOptions:")
-	fmt.Println("  --channel <name>       Target YouTube channel profile name")
-	fmt.Println("  --privacy <type>       Privacy for new playlist (public, unlisted, private)")
-	fmt.Println("  --description <desc>   Description for new playlist")
-	fmt.Println("  --default              Set newly created playlist as default in config")
-}

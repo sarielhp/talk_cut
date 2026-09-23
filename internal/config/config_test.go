@@ -142,3 +142,51 @@ func TestSaveConfigAndDefaultPlaylist(t *testing.T) {
 		t.Errorf("expected DefaultPlaylist PL_test_playlist_123, got %q", loaded.DefaultPlaylist)
 	}
 }
+
+func TestWhisperConfigResolution(t *testing.T) {
+	tempHome := t.TempDir()
+	t.Setenv("HOME", tempHome)
+
+	// Mock whisper executable and model in fake home
+	binDir := filepath.Join(tempHome, ".local", "bin")
+	_ = os.MkdirAll(binDir, 0o755)
+	mockBin := filepath.Join(binDir, "whisper-cli-rocm")
+	_ = os.WriteFile(mockBin, []byte("#!/bin/sh\n"), 0o755)
+
+	modelsDir := filepath.Join(tempHome, ".local", "share", "whisper-models")
+	_ = os.MkdirAll(modelsDir, 0o755)
+	mockModel := filepath.Join(modelsDir, "ggml-large-v3-turbo.bin")
+	_ = os.WriteFile(mockModel, []byte("model"), 0o644)
+
+	cfg := DefaultConfig()
+	resolvedBin := cfg.ResolveWhisperBin()
+	if resolvedBin != mockBin {
+		t.Errorf("expected auto-resolved bin %q, got %q", mockBin, resolvedBin)
+	}
+
+	resolvedModel := cfg.ResolveWhisperModel()
+	if resolvedModel != mockModel {
+		t.Errorf("expected auto-resolved model %q, got %q", mockModel, resolvedModel)
+	}
+
+	// Test explicit config takes priority
+	cfg.WhisperBin = mockBin
+	cfg.WhisperModel = mockModel
+	if cfg.ResolveWhisperBin() != mockBin {
+		t.Errorf("expected configured bin %q", mockBin)
+	}
+
+	// Test env overrides
+	t.Setenv("TALK_CUT_WHISPER_BIN", "/custom/bin/whisper")
+	t.Setenv("TALK_CUT_WHISPER_MODEL", "/custom/model.bin")
+	loaded, err := LoadConfig()
+	if err != nil {
+		t.Fatalf("LoadConfig failed: %v", err)
+	}
+	if loaded.WhisperBin != "/custom/bin/whisper" {
+		t.Errorf("expected env WhisperBin, got %q", loaded.WhisperBin)
+	}
+	if loaded.WhisperModel != "/custom/model.bin" {
+		t.Errorf("expected env WhisperModel, got %q", loaded.WhisperModel)
+	}
+}

@@ -44,8 +44,11 @@ type cliOptions struct {
 	playlist      string
 	keyFile       string
 	model         string
+	whisperBin    string
+	whisperModel  string
+	whisperPrompt string
+	transcribe    bool
 	showVersion   bool
-	showHelp      bool
 }
 
 func main() {
@@ -73,12 +76,23 @@ func executePipeline(opts *cliOptions) error {
 	}
 	applyConfigOverrides(&cfg, opts)
 
-	b, err := bundle.DiscoverBundle(opts.dir, cfg.PreferredLayout)
+	b, err := bundle.DiscoverBundleWithOptions(opts.dir, cfg.PreferredLayout, opts.transcribe)
 	if err != nil {
-		return fmt.Errorf("discovering bundle: %w", err)
+		if strings.Contains(err.Error(), "no WebVTT transcript") && !opts.transcribe {
+			opts.transcribe = true
+			b, err = bundle.DiscoverBundleWithOptions(opts.dir, cfg.PreferredLayout, true)
+		}
+		if err != nil {
+			return fmt.Errorf("discovering bundle: %w", err)
+		}
 	}
 
 	ctx := context.Background()
+	if opts.transcribe || b.TranscriptPath == "" {
+		if err := ensureWhisperTranscript(ctx, b, opts, cfg); err != nil {
+			return fmt.Errorf("transcribing audio: %w", err)
+		}
+	}
 	mediaInfo, err := cutter.ProbeMedia(ctx, b.PrimaryVideo)
 	if err != nil {
 		return fmt.Errorf("probing video %q: %w", b.PrimaryVideo, err)
@@ -130,6 +144,12 @@ func applyConfigOverrides(cfg *config.Config, opts *cliOptions) {
 	}
 	if opts.layout != "" {
 		cfg.PreferredLayout = opts.layout
+	}
+	if opts.whisperBin != "" {
+		cfg.WhisperBin = opts.whisperBin
+	}
+	if opts.whisperModel != "" {
+		cfg.WhisperModel = opts.whisperModel
 	}
 }
 

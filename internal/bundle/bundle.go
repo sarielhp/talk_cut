@@ -25,6 +25,11 @@ type RecordingBundle struct {
 // DiscoverBundle inspects the directory and resolves recording files.
 // preferredLayout can be "slides" (default), "clean", "speaker", or "gallery".
 func DiscoverBundle(dir string, preferredLayout string) (*RecordingBundle, error) {
+	return DiscoverBundleWithOptions(dir, preferredLayout, false)
+}
+
+// DiscoverBundleWithOptions inspects the directory with optional tolerance for missing transcripts.
+func DiscoverBundleWithOptions(dir string, preferredLayout string, allowMissingTranscript bool) (*RecordingBundle, error) {
 	info, err := os.Stat(dir)
 	if err != nil {
 		return nil, fmt.Errorf("reading recording directory %q: %w", dir, err)
@@ -51,7 +56,7 @@ func DiscoverBundle(dir string, preferredLayout string) (*RecordingBundle, error
 		classifyFile(b, name, fullPath)
 	}
 
-	if b.TranscriptPath == "" {
+	if !allowMissingTranscript && b.TranscriptPath == "" {
 		return nil, fmt.Errorf("no WebVTT transcript (.vtt) found in %q", dir)
 	}
 
@@ -79,8 +84,11 @@ func classifyFile(b *RecordingBundle, name, fullPath string) {
 	}
 
 	if strings.HasSuffix(lower, ".vtt") {
-		// Prefer files containing ".transcript.vtt" if multiple exist
-		if b.TranscriptPath == "" || strings.Contains(lower, "transcript") {
+		if strings.Contains(lower, ".zoom") || strings.Contains(lower, "_bak") || strings.HasSuffix(lower, ".bak.vtt") {
+			return
+		}
+		// Prefer files containing or ending in ".transcript.vtt"
+		if b.TranscriptPath == "" || strings.HasSuffix(lower, ".transcript.vtt") {
 			b.TranscriptPath = fullPath
 		}
 		return

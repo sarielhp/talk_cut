@@ -51,6 +51,10 @@ func buildApp(opts *cliOptions) *clihelp.App {
 			// nowhere.
 			clihelp.Bool(&opts.updateYouTube, "--update-youtube, --update-info, --update-details", false,
 				"Update talk details on YouTube for an already uploaded talk"),
+			clihelp.Bool(&opts.transcribe, "--transcribe", false, "Transcribe recording audio using local Whisper before cutting"),
+			clihelp.String(&opts.whisperBin, "--whisper-bin <path>", "", "Path to whisper executable (default from config or auto-detected)"),
+			clihelp.String(&opts.whisperModel, "--whisper-model <path>", "", "Path to whisper model file (default from config or auto-detected)"),
+			clihelp.String(&opts.whisperPrompt, "--whisper-prompt <text>", "", "Initial vocabulary prompt for Whisper"),
 			clihelp.Bool(&opts.noAI, "--no-ai", false, "Skip AI cut and chapter detection"),
 			clihelp.Bool(&opts.reDetect, "--re-detect", false, "Re-run AI cut and chapter detection even if saved files exist"),
 			clihelp.Bool(&opts.dryRun, "--dry-run", false, "Analyse and print the plan without opening the TUI or touching YouTube"),
@@ -59,11 +63,13 @@ func buildApp(opts *cliOptions) *clihelp.App {
 		},
 		Examples: []clihelp.Example{
 			{Line: "talk_cut ~/recordings/2026-09-19", Description: "Cut a recording, choosing the cuts in the TUI."},
+			{Line: "talk_cut --transcribe ~/recordings/2026-09-19", Description: "Transcribe with Whisper then cut in the TUI."},
 			{Line: "talk_cut --upload --playlist Seminars ~/recordings/2026-09-19", Description: "Cut it and publish it to a playlist."},
 			{Line: "talk_cut --meta-only -u https://example.org/seminar ~/recordings/2026-09-19", Description: "Only fetch the announcement metadata."},
 		},
 		Run: func(ctx *clihelp.Context) error { return runRoot(ctx, opts) },
 		Commands: []clihelp.Command{
+			transcribeCmd(),
 			authCmd(),
 			youtubeCmd(),
 			clihelp.CompletionCommand(),
@@ -390,6 +396,34 @@ func playlistCmd() clihelp.Command {
 					return runPlaylistRemoveWith(ctx.Args[0], ctx.Args[1], removeChannel)
 				},
 			},
+		},
+	}
+}
+
+func transcribeCmd() clihelp.Command {
+	var whisperBin, whisperModel, prompt, language string
+	var force bool
+
+	return clihelp.Command{
+		Name:        "transcribe",
+		Description: "Transcribe a talk recording using local Whisper.",
+		UsageLine:   "talk_cut transcribe [options] <recording-directory>",
+		Parameters: []clihelp.Param{
+			{Name: "<recording-directory>", Description: "The recording directory containing audio or video."},
+		},
+		Args: clihelp.ExactArgs(1),
+		Options: []clihelp.Option{
+			clihelp.String(&whisperBin, "--whisper-bin <path>", "", "Path to whisper executable"),
+			clihelp.String(&whisperModel, "--whisper-model <path>", "", "Path to whisper model file"),
+			clihelp.String(&prompt, "--prompt <text>", "", "Initial vocabulary prompt for Whisper"),
+			clihelp.String(&language, "--lang <lang>", "en", "Language spoken (default: en)"),
+			clihelp.Bool(&force, "-f, --force", false, "Overwrite existing transcript even if present"),
+		},
+		Examples: []clihelp.Example{
+			{Line: "talk_cut transcribe examples/26_09_22/", Description: "Transcribe audio to WebVTT."},
+		},
+		Run: func(ctx *clihelp.Context) error {
+			return runTranscribeSubcommand(ctx.Args[0], whisperBin, whisperModel, prompt, language, force)
 		},
 	}
 }
