@@ -289,3 +289,57 @@ func TestRenderCueRow(t *testing.T) {
 		t.Errorf("row1 contains leaked ANSI escape text: %s", cleanRow1)
 	}
 }
+
+func TestCardLayoutStealsLinesFromTranscript(t *testing.T) {
+	longText := strings.Repeat("word ", 80)
+	cues := []model.SubtitleCue{
+		{ID: 1, Start: 0, End: time.Second, Speaker: "Alice", Text: longText, Action: model.ActionKeep},
+		{ID: 2, Start: time.Second, End: 2 * time.Second, Speaker: "Bob", Text: "ok", Action: model.ActionKeep},
+	}
+	media := cutter.MediaInfo{Duration: 5 * time.Second}
+
+	tall := NewCutsModel(cues, media, "x.mp4", "")
+	tall.SetDimensions(100, 40)
+	tall.setCursor(0)
+	_, _, tallInner := tall.cardLayout()
+	if tallInner != 1+maxPreviewLines {
+		t.Errorf("preview should cap at %d text lines, got card inner=%d", maxPreviewLines, tallInner)
+	}
+
+	short := NewCutsModel(cues, media, "x.mp4", "")
+	short.SetDimensions(100, 14)
+	short.setCursor(0)
+	shortBody, _, shortInner := short.cardLayout()
+	if shortBody < minTranscriptBody {
+		t.Errorf("transcript body %d below minimum %d", shortBody, minTranscriptBody)
+	}
+	if shortBody > 4 {
+		t.Errorf("expected card to steal lines on a short terminal, body=%d", shortBody)
+	}
+	if shortInner != 1+maxPreviewLines {
+		t.Errorf("short terminal should still show the full preview, got card inner=%d", shortInner)
+	}
+
+	if got := len(strings.Split(short.View(), "\n")); got != 14 {
+		t.Errorf("expected exact height 14, got %d", got)
+	}
+}
+
+func TestCardLayoutVeryShortTerminal(t *testing.T) {
+	longText := strings.Repeat("word ", 80)
+	cues := []model.SubtitleCue{{ID: 1, Start: 0, End: time.Second, Speaker: "A", Text: longText, Action: model.ActionKeep}}
+
+	m := NewCutsModel(cues, cutter.MediaInfo{Duration: time.Second}, "x.mp4", "")
+	m.SetDimensions(100, 9)
+	m.setCursor(0)
+	body, _, inner := m.cardLayout()
+	if body < minTranscriptBody {
+		t.Errorf("body %d below min %d", body, minTranscriptBody)
+	}
+	if inner < 3 {
+		t.Errorf("card inner lines %d below chrome minimum", inner)
+	}
+	if got := len(strings.Split(m.View(), "\n")); got != 9 {
+		t.Errorf("expected exact height 9, got %d", got)
+	}
+}

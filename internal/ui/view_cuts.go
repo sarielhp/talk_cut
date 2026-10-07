@@ -344,11 +344,12 @@ func (m CutsModel) pageSize() int {
 
 // visibleLines returns the available height for cue rows in the top split panel.
 func (m CutsModel) visibleLines() int {
-	h := m.height - 10
-	if h < 5 {
-		return 5
+	bodyHeight, _, _ := m.cardLayout()
+	v := bodyHeight - 1 // subtract the transcript header bar
+	if v < 1 {
+		return 1
 	}
-	return h
+	return v
 }
 
 // toggleCurrent toggles the cut status of the current cue and automatically persists cuts.
@@ -464,22 +465,7 @@ func (m CutsModel) View() string {
 	header := m.renderHeader()
 	footer := m.renderFooter()
 
-	var activeCue model.SubtitleCue
-	if len(m.cues) > 0 && m.cursor >= 0 && m.cursor < len(m.cues) {
-		activeCue = m.cues[m.cursor]
-	}
-
-	cardHeight, innerLines := m.computeCardHeight(m.width, activeCue)
-	bodyHeight := m.height - 2 - cardHeight
-	if bodyHeight < 6 {
-		bodyHeight = 6
-		cardHeight = m.height - 2 - bodyHeight
-		if cardHeight < 4 {
-			cardHeight = 4
-		}
-		innerLines = cardHeight - 2
-	}
-
+	bodyHeight, _, innerLines := m.cardLayout()
 	bottomCard := m.renderBottomCueCard(m.width, innerLines)
 
 	sidebarWidth := 38
@@ -536,38 +522,6 @@ func (m CutsModel) activeCutIntervals() []model.CutInterval {
 		}
 	}
 	return cuts
-}
-
-// computeCardHeight dynamically measures wrapped cue text to scale the bottom card.
-func (m CutsModel) computeCardHeight(width int, cue model.SubtitleCue) (cardHeight, innerLines int) {
-	innerWidth := width - 4
-	if innerWidth < 20 {
-		innerWidth = 20
-	}
-
-	speakerPrefix := ""
-	if cue.Speaker != "" {
-		speakerPrefix = cue.Speaker + ": "
-	}
-	fullText := speakerPrefix + "\"" + cue.Text + "\""
-
-	wrapped := lipgloss.NewStyle().Width(innerWidth).Render(fullText)
-	textLines := strings.Split(wrapped, "\n")
-
-	maxCard := m.height - 8
-	if maxCard < 4 {
-		maxCard = 4
-	}
-
-	desired := 1 + len(textLines) + 2
-	if desired > maxCard {
-		desired = maxCard
-	}
-	if desired < 5 {
-		desired = 5
-	}
-
-	return desired, desired - 2
 }
 
 // renderHeader renders the top title bar (exactly 1 line).
@@ -771,7 +725,7 @@ func (m CutsModel) renderDefaultHints(availWidth int) string {
 	msg := m.statusMsg
 	if msg == "" {
 		if availWidth >= 75 {
-			msg = "j/k: nav | Space: cut/keep | Tab: chapter | c: commit cut | s: save | p: preview | F1: help"
+			msg = "j/k: nav | Space: cut/keep | Tab: chapter | c: commit cut | t: transcript | p: preview | F1: help"
 		} else if availWidth >= 55 {
 			msg = "j/k: nav | Space: cut/keep | Tab: chapter | c: commit cut | F1: help"
 		} else if availWidth >= 30 {

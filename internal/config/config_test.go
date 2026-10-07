@@ -143,50 +143,35 @@ func TestSaveConfigAndDefaultPlaylist(t *testing.T) {
 	}
 }
 
-func TestWhisperConfigResolution(t *testing.T) {
+func TestWhisperConfigLoading(t *testing.T) {
 	tempHome := t.TempDir()
 	t.Setenv("HOME", tempHome)
 
-	// Mock whisper executable and model in fake home
-	binDir := filepath.Join(tempHome, ".local", "bin")
-	_ = os.MkdirAll(binDir, 0o755)
-	mockBin := filepath.Join(binDir, "whisper-cli-rocm")
-	_ = os.WriteFile(mockBin, []byte("#!/bin/sh\n"), 0o755)
-
-	modelsDir := filepath.Join(tempHome, ".local", "share", "whisper-models")
-	_ = os.MkdirAll(modelsDir, 0o755)
-	mockModel := filepath.Join(modelsDir, "ggml-large-v3-turbo.bin")
-	_ = os.WriteFile(mockModel, []byte("model"), 0o644)
-
-	cfg := DefaultConfig()
-	resolvedBin := cfg.ResolveWhisperBin()
-	if resolvedBin != mockBin {
-		t.Errorf("expected auto-resolved bin %q, got %q", mockBin, resolvedBin)
+	dir := filepath.Join(tempHome, ".config", "talk_cut")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatalf("mkdir config dir: %v", err)
 	}
 
-	resolvedModel := cfg.ResolveWhisperModel()
-	if resolvedModel != mockModel {
-		t.Errorf("expected auto-resolved model %q, got %q", mockModel, resolvedModel)
+	content := `{
+  "whisperx_url": "http://tqed:8095",
+  "whisper_language": "he",
+  "whisper_prompt": "NLP, semantics"
+}`
+	if err := os.WriteFile(filepath.Join(dir, "config.json"), []byte(content), 0o644); err != nil {
+		t.Fatalf("write config: %v", err)
 	}
 
-	// Test explicit config takes priority
-	cfg.WhisperBin = mockBin
-	cfg.WhisperModel = mockModel
-	if cfg.ResolveWhisperBin() != mockBin {
-		t.Errorf("expected configured bin %q", mockBin)
-	}
-
-	// Test env overrides
-	t.Setenv("TALK_CUT_WHISPER_BIN", "/custom/bin/whisper")
-	t.Setenv("TALK_CUT_WHISPER_MODEL", "/custom/model.bin")
-	loaded, err := LoadConfig()
+	cfg, err := LoadConfig()
 	if err != nil {
 		t.Fatalf("LoadConfig failed: %v", err)
 	}
-	if loaded.WhisperBin != "/custom/bin/whisper" {
-		t.Errorf("expected env WhisperBin, got %q", loaded.WhisperBin)
+	if cfg.WhisperxURL != "http://tqed:8095" {
+		t.Errorf("expected whisperx_url from config, got %q", cfg.WhisperxURL)
 	}
-	if loaded.WhisperModel != "/custom/model.bin" {
-		t.Errorf("expected env WhisperModel, got %q", loaded.WhisperModel)
+	if cfg.WhisperLanguage != "he" {
+		t.Errorf("expected whisper_language from config, got %q", cfg.WhisperLanguage)
+	}
+	if cfg.WhisperPrompt != "NLP, semantics" {
+		t.Errorf("expected whisper_prompt from config, got %q", cfg.WhisperPrompt)
 	}
 }

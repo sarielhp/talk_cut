@@ -20,6 +20,7 @@ import (
 	"talk_cut/internal/model"
 	"talk_cut/internal/ui"
 	"talk_cut/internal/vtt"
+	"talk_cut/internal/whisper"
 	"talk_cut/internal/youtube"
 )
 
@@ -44,9 +45,6 @@ type cliOptions struct {
 	playlist      string
 	keyFile       string
 	model         string
-	whisperBin    string
-	whisperModel  string
-	whisperPrompt string
 	transcribe    bool
 	showVersion   bool
 }
@@ -89,7 +87,7 @@ func executePipeline(opts *cliOptions) error {
 
 	ctx := context.Background()
 	if opts.transcribe || b.TranscriptPath == "" {
-		if err := ensureWhisperTranscript(ctx, b, opts, cfg); err != nil {
+		if err := ensureWhisperTranscript(ctx, b, cfg, opts.transcribe); err != nil {
 			return fmt.Errorf("transcribing audio: %w", err)
 		}
 	}
@@ -104,6 +102,7 @@ func executePipeline(opts *cliOptions) error {
 	}
 
 	talkMeta := initialMetadata(ctx, opts, cfg)
+	model.NameDominantSpeaker(cues, talkMeta.Speaker)
 	if model.HasSavedCuts(opts.dir) && !opts.reDetect {
 		if savedCuts, loadErr := model.LoadCutsFile(opts.dir); loadErr == nil {
 			model.ApplyCutsToCues(cues, savedCuts)
@@ -145,12 +144,103 @@ func applyConfigOverrides(cfg *config.Config, opts *cliOptions) {
 	if opts.layout != "" {
 		cfg.PreferredLayout = opts.layout
 	}
-	if opts.whisperBin != "" {
-		cfg.WhisperBin = opts.whisperBin
+}
+
+// ensureWhisperTranscript transcribes the bundle's audio when no transcript is
+// present yet, or unconditionally when force is set.
+func ensureWhisperTranscript(ctx context.Context, b *bundle.RecordingBundle, cfg config.Config, force bool) error {
+	if b.TranscriptPath != "" && !force {
+		fmt.Printf("Transcript already present: %s (use --force to overwrite)\n", b.TranscriptPath)
+		return nil
 	}
-	if opts.whisperModel != "" {
-		cfg.WhisperModel = opts.whisperModel
+	return transcribeBundle(ctx, b, cfg)
+}
+
+// transcribeBundle extracts the bundle audio and asks the configured Whisper
+// server to transcribe it, writing a WebVTT transcript beside the source.
+func transcribeBundle(ctx context.Context, b *bundle.RecordingBundle, cfg config.Config) error {
+	client, err := whisper.NewClient(whisper.Options{
+		URL:      cfg.WhisperxURL,
+		Language: cfg.WhisperLanguage,
+		Prompt:   cfg.WhisperPrompt,
+	})
+	if err != nil {
+		return err
 	}
+
+	input := b.AudioPath
+	if input == "" {
+		input = b.PrimaryVideo
+	}
+	if input == "" {
+		return fmt.Errorf("no audio or video file found to transcribe")
+	}
+
+	tmp, err := os.CreateTemp("", "talk_cut-audio-*.wav")
+	if err != nil {
+		return fmt.Errorf("creating temp audio file: %w", err)
+	}
+	tmpPath := tmp.Name()
+	tmp.Close()
+	defer os.Remove(tmpPath)
+
+	fmt.Printf("Extracting audio from %s...\n", filepath.Base(input))
+	if err := cutter.ExtractAudio(ctx, input, tmpPath); err != nil {
+		return err
+	}
+
+	fmt.Printf("Transcribing via %s (this may take a while)...\n", cfg.WhisperxURL)
+	cues, err := client.Transcribe(ctx, tmpPath)
+	if err != nil {
+		return err
+	}
+
+	base := b.PrimaryVideo
+	if base == "" {
+		base = input
+	}
+	outPath := transcriptPathFor(base)
+	if err := writeVTT(outPath, cues); err != nil {
+		return err
+	}
+
+	b.TranscriptPath = outPath
+	fmt.Printf("Wrote %d cues to %s\n", len(cues), outPath)
+	return nil
+}
+
+// transcriptPathFor derives the <video>.transcript.vtt path next to a source.
+func transcriptPathFor(sourcePath string) string {
+	return strings.TrimSuffix(sourcePath, filepath.Ext(sourcePath)) + ".transcript.vtt"
+}
+
+// writeVTT writes subtitle cues to path as WebVTT.
+func writeVTT(path string, cues []model.SubtitleCue) error {
+	f, err := os.Create(path)
+	if err != nil {
+		return fmt.Errorf("creating transcript %q: %w", path, err)
+	}
+	defer f.Close()
+
+	if err := vtt.Write(f, cues); err != nil {
+		return fmt.Errorf("writing transcript %q: %w", path, err)
+	}
+	return nil
+}
+
+// runTranscribeSubcommand implements `talk_cut transcribe <directory>`.
+func runTranscribeSubcommand(dir string, force bool) error {
+	cfg, err := config.LoadConfig()
+	if err != nil {
+		return fmt.Errorf("loading config: %w", err)
+	}
+
+	b, err := bundle.DiscoverBundleWithOptions(dir, cfg.PreferredLayout, true)
+	if err != nil {
+		return fmt.Errorf("discovering bundle: %w", err)
+	}
+
+	return ensureWhisperTranscript(context.Background(), b, cfg, force)
 }
 
 // runMetaOnly fetches metadata from URL or announcement email and saves talk_meta.json without launching TUI.

@@ -2,6 +2,8 @@
 package ui
 
 import (
+	"errors"
+	"strings"
 	"testing"
 	"time"
 
@@ -11,6 +13,8 @@ import (
 	"talk_cut/internal/cutter"
 	"talk_cut/internal/model"
 )
+
+var errCleanTranscriptTest = errors.New("boom")
 
 func TestAppModelScreenTransitions(t *testing.T) {
 	b := bundle.RecordingBundle{
@@ -165,5 +169,39 @@ func TestAppModelChapterJumpKeys(t *testing.T) {
 	app = res.(AppModel)
 	if app.screen != ScreenCuts {
 		t.Fatalf("expected to remain on ScreenCuts, got %d", app.screen)
+	}
+}
+
+func TestAppModelCleanTranscriptKey(t *testing.T) {
+	b := bundle.RecordingBundle{Dir: t.TempDir(), PrimaryVideo: "test_video.mp4"}
+	media := cutter.MediaInfo{Duration: 60 * time.Second}
+	app := NewAppModel(b, media, makeTestCues(), model.TalkMetadata{Title: "Test Talk"}, "output.mp4")
+	app.handleWindowSize(tea.WindowSizeMsg{Width: 100, Height: 30})
+
+	_, cmd := app.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("t")})
+	if cmd == nil {
+		t.Fatalf("expected a command to be returned for the clean transcript key")
+	}
+}
+
+func TestAppModelCleanTranscriptMsgFeedback(t *testing.T) {
+	b := bundle.RecordingBundle{Dir: t.TempDir(), PrimaryVideo: "test_video.mp4"}
+	media := cutter.MediaInfo{Duration: 60 * time.Second}
+	app := NewAppModel(b, media, makeTestCues(), model.TalkMetadata{Title: "Test Talk"}, "output.mp4")
+	app.handleWindowSize(tea.WindowSizeMsg{Width: 100, Height: 30})
+
+	res, _ := app.Update(cleanTranscriptMsg{path: "/tmp/clean_transcript.md", polished: true})
+	app = res.(AppModel)
+	if !strings.Contains(app.cutsView.saveFeedback, "local + AI polish") {
+		t.Errorf("expected success feedback mentioning AI polish, got %q", app.cutsView.saveFeedback)
+	}
+	if app.cutsView.saveIsError {
+		t.Errorf("expected non-error feedback")
+	}
+
+	res, _ = app.Update(cleanTranscriptMsg{err: errCleanTranscriptTest})
+	app = res.(AppModel)
+	if !app.cutsView.saveIsError {
+		t.Errorf("expected error feedback on failure")
 	}
 }

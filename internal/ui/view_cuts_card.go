@@ -16,7 +16,7 @@ import (
 func (m CutsModel) renderSidebar(width, bodyHeight int, stats model.CutStats, intervals []model.CutInterval) string {
 	statsBox := m.renderStatsBox(width, stats)
 
-	statsLines := 4
+	statsLines := lipgloss.Height(statsBox)
 	availForCuts := bodyHeight - statsLines
 	var cutsBox string
 	if availForCuts >= 3 {
@@ -30,7 +30,85 @@ func (m CutsModel) renderSidebar(width, bodyHeight int, stats model.CutStats, in
 	}
 
 	content := lipgloss.JoinVertical(lipgloss.Left, boxes...)
+	content = clampHeight(content, bodyHeight)
 	return lipgloss.NewStyle().Width(width).Height(bodyHeight).MarginLeft(1).Render(content)
+}
+
+// clampHeight trims rendered content to at most maxLines lines.
+func clampHeight(content string, maxLines int) string {
+	if maxLines < 1 {
+		return ""
+	}
+	lines := strings.Split(content, "\n")
+	if len(lines) <= maxLines {
+		return content
+	}
+	return strings.Join(lines[:maxLines], "\n")
+}
+
+const (
+	// maxPreviewLines caps how many wrapped text lines the bottom cue card shows.
+	maxPreviewLines = 5
+	// minTranscriptBody keeps a minimal number of transcript rows visible so
+	// navigation stays usable even when the bottom card grows.
+	minTranscriptBody = 3
+)
+
+// cardLayout computes the transcript body height and the bottom cue card
+// dimensions for the active cue. The card grows to show the cue's full text
+// (up to maxPreviewLines) and takes those lines from the transcript pane,
+// keeping only minTranscriptBody rows available above.
+func (m CutsModel) cardLayout() (bodyHeight, cardHeight, innerLines int) {
+	if len(m.cues) == 0 || m.cursor < 0 || m.cursor >= len(m.cues) {
+		bodyHeight = m.height - 2
+		if bodyHeight < minTranscriptBody {
+			bodyHeight = minTranscriptBody
+		}
+		return bodyHeight, 0, 0
+	}
+
+	textLines := m.wrapCueText(m.cues[m.cursor])
+	if len(textLines) > maxPreviewLines {
+		textLines = textLines[:maxPreviewLines]
+	}
+	innerLines = 1 + len(textLines) // metadata line plus preview lines
+
+	// Header and footer occupy 2 lines, the card border 2 more; keep a minimal
+	// transcript pane so the card cannot starve the list entirely.
+	maxInner := m.height - 4 - minTranscriptBody
+	if maxInner < 3 {
+		maxInner = 3
+	}
+	if innerLines > maxInner {
+		innerLines = maxInner
+	}
+	if innerLines < 3 {
+		innerLines = 3
+	}
+
+	cardHeight = innerLines + 2
+	bodyHeight = m.height - 2 - cardHeight
+	if bodyHeight < minTranscriptBody {
+		bodyHeight = minTranscriptBody
+	}
+	return bodyHeight, cardHeight, innerLines
+}
+
+// wrapCueText wraps the active cue's full text (speaker prefix and quotes) to
+// the bottom card's inner width.
+func (m CutsModel) wrapCueText(cue model.SubtitleCue) []string {
+	innerWidth := m.width - 4
+	if innerWidth < 20 {
+		innerWidth = 20
+	}
+
+	speakerPrefix := ""
+	if cue.Speaker != "" {
+		speakerPrefix = cue.Speaker + ": "
+	}
+	fullText := speakerPrefix + "\"" + cue.Text + "\""
+
+	return strings.Split(lipgloss.NewStyle().Width(innerWidth).Render(fullText), "\n")
 }
 
 // renderStatsBox formats the duration and cut statistics.
@@ -235,8 +313,8 @@ func (m CutsModel) renderFloatingHelpDialog(width int) string {
 		"  g / G       Jump top / bottom          s / Ctrl+S  Save cuts to disk",
 		"  pgdn / pgup Page down / up             p           Preview cue (ffplay)",
 		"  n / N       Jump next / prev cut       c / Ctrl+R  Commit cuts & render",
-		"  r / Ctrl+A  Redo chapters with AI      q / Ctrl+C  Quit talk_cut",
-		"  F1 / ?      Toggle help modal          1 .. 4      Direct tab jump",
+		"  t           Clean transcript (AI)      r / Ctrl+A  Redo chapters with AI",
+		"  q / Ctrl+C  Quit talk_cut              F1 / ?      Toggle help modal",
 	}
 
 	dialogWidth := 78

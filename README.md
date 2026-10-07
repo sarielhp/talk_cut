@@ -351,6 +351,9 @@ Configuration is stored in `~/.config/talk_cut/config.json`:
   "base_url": "https://openrouter.ai/api/v1",
   "default_privacy": "public",
   "preferred_layout": "slides",
+  "whisperx_url": "http://tqed:8095",
+  "whisper_language": "en",
+  "whisper_prompt": "NLP, semantics, Carleton University",
   "default_channel": "seminar",
   "default_playlist": "PLeTNkk9BjmVQxxxxxxx",
   "channels": {
@@ -369,9 +372,24 @@ Configuration is stored in `~/.config/talk_cut/config.json`:
 | `base_url` | string | Base URL for OpenRouter API |
 | `default_privacy` | string | Default YouTube video privacy: `unlisted`, `public`, or `private` |
 | `preferred_layout` | string | Default Zoom video layout: `slides`, `clean`, `speaker`, `gallery` |
+| `whisperx_url` | string | Base URL of the WhisperX docker used for transcription (e.g. `http://tqed:8095`). A plain whisper.cpp server also works. |
+| `whisper_language` | string | Spoken language hint passed to Whisper (default: `en`) |
+| `whisper_prompt` | string | Optional vocabulary prompt to bias transcription (names, jargon) |
 | `default_channel` | string | Default channel profile when `--channel` is omitted |
 | `default_playlist` | string | Default YouTube playlist ID assigned to new talks |
 | `channels` | map | Channel profile name to OAuth token path mappings |
+
+### Transcription Backend
+
+`whisperx_url` points at the WhisperX docker. Its diarization labels
+(`SPEAKER_00`, `SPEAKER_01`, …) are stored on each cue and flow into the AI cut
+detection, chapter detection, and clean-transcript exports, letting the model
+tell the host, the speaker, and the Q&A apart. Speaker names are only rewritten
+when **every** label is a synthetic `SPEAKER_NN`: then the most talkative speaker
+is named using `talk_meta.json`'s speaker, while real names from a Zoom-generated
+transcript are always left untouched. Servers behind Sablier (which suspend when
+idle) are woken automatically: the client probes `/health` and retries until the
+container has resumed.
 
 ### Environment Variables
 

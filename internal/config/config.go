@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 )
@@ -15,8 +14,9 @@ type Config struct {
 	KeyFile          string            `json:"key_file"`
 	Model            string            `json:"model"`
 	BaseURL          string            `json:"base_url"`
-	WhisperBin       string            `json:"whisper_bin,omitempty"`
-	WhisperModel     string            `json:"whisper_model,omitempty"`
+	WhisperxURL      string            `json:"whisperx_url,omitempty"`
+	WhisperLanguage  string            `json:"whisper_language,omitempty"`
+	WhisperPrompt    string            `json:"whisper_prompt,omitempty"`
 	YouTubeSecrets   string            `json:"youtube_secrets"`
 	YouTubeTokenFile string            `json:"youtube_token_file,omitempty"`
 	DefaultChannel   string            `json:"default_channel,omitempty"`
@@ -64,13 +64,6 @@ func LoadConfig() (Config, error) {
 	if envPlay := os.Getenv("TALK_CUT_DEFAULT_PLAYLIST"); envPlay != "" {
 		cfg.DefaultPlaylist = strings.TrimSpace(envPlay)
 	}
-	if envWhisperBin := os.Getenv("TALK_CUT_WHISPER_BIN"); envWhisperBin != "" {
-		cfg.WhisperBin = strings.TrimSpace(envWhisperBin)
-	}
-	if envWhisperModel := os.Getenv("TALK_CUT_WHISPER_MODEL"); envWhisperModel != "" {
-		cfg.WhisperModel = strings.TrimSpace(envWhisperModel)
-	}
-
 	return cfg, nil
 }
 
@@ -113,6 +106,15 @@ func loadFromTalkCutConfig(cfg *Config, home string) {
 		}
 		if stored.DefaultPlaylist != "" {
 			cfg.DefaultPlaylist = stored.DefaultPlaylist
+		}
+		if stored.WhisperxURL != "" {
+			cfg.WhisperxURL = stored.WhisperxURL
+		}
+		if stored.WhisperLanguage != "" {
+			cfg.WhisperLanguage = stored.WhisperLanguage
+		}
+		if stored.WhisperPrompt != "" {
+			cfg.WhisperPrompt = stored.WhisperPrompt
 		}
 	}
 }
@@ -298,62 +300,4 @@ func (c Config) SaveConfig() error {
 	}
 
 	return nil
-}
-
-// ResolveWhisperBin determines the whisper executable path from config, standard paths, or PATH.
-func (c Config) ResolveWhisperBin() string {
-	if c.WhisperBin != "" {
-		if resolved, err := ResolvePath(c.WhisperBin); err == nil {
-			if fi, err := os.Stat(resolved); err == nil && !fi.IsDir() {
-				return resolved
-			}
-		}
-	}
-
-	home, _ := os.UserHomeDir()
-	candidates := []string{
-		filepath.Join(home, ".local", "bin", "whisper-cli-rocm"),
-		filepath.Join(home, ".local", "bin", "whisper-cli"),
-		filepath.Join(home, "bin", "whisper-cli-rocm"),
-		filepath.Join(home, "bin", "whisper-cli"),
-	}
-	for _, cand := range candidates {
-		if fi, err := os.Stat(cand); err == nil && !fi.IsDir() {
-			return cand
-		}
-	}
-	for _, name := range []string{"whisper-cli-rocm", "whisper-cli", "whisper"} {
-		if p, err := exec.LookPath(name); err == nil {
-			return p
-		}
-	}
-	return ""
-}
-
-// ResolveWhisperModel determines the whisper model path from config or standard model locations.
-func (c Config) ResolveWhisperModel() string {
-	if c.WhisperModel != "" {
-		if resolved, err := ResolvePath(c.WhisperModel); err == nil {
-			if fi, err := os.Stat(resolved); err == nil && !fi.IsDir() {
-				return resolved
-			}
-		}
-	}
-
-	home, _ := os.UserHomeDir()
-	candidates := []string{
-		filepath.Join(home, ".local", "share", "whisper-models", "ggml-large-v3-turbo.bin"),
-		filepath.Join(home, ".local", "share", "whisper-models", "ggml-distil-large-v3.bin"),
-		filepath.Join(home, ".local", "share", "whisper-models", "ggml-base.en.bin"),
-		filepath.Join(home, ".local", "share", "whisper-models", "ggml-tiny.en.bin"),
-		"/media/dockers/whisper/models/ggml-large-v3-turbo.bin",
-		"/media/dockers/whisper/models/ggml-distil-large-v3.bin",
-		"/media/dockers/whisper/models/ggml-base.en.bin",
-	}
-	for _, cand := range candidates {
-		if fi, err := os.Stat(cand); err == nil && !fi.IsDir() {
-			return cand
-		}
-	}
-	return ""
 }

@@ -60,7 +60,7 @@ func DiscoverBundleWithOptions(dir string, preferredLayout string, allowMissingT
 		return nil, fmt.Errorf("no WebVTT transcript (.vtt) found in %q", dir)
 	}
 
-	if len(b.AllVideos) == 0 {
+	if len(b.AllVideos) == 0 && !allowMissingTranscript {
 		return nil, fmt.Errorf("no video files (.mp4/.mkv) found in %q", dir)
 	}
 
@@ -70,7 +70,9 @@ func DiscoverBundleWithOptions(dir string, preferredLayout string, allowMissingT
 	}
 	b.EmlPath = emlPath
 
-	b.PrimaryVideo = selectPrimaryVideo(b.AllVideos, preferredLayout)
+	if len(b.AllVideos) > 0 {
+		b.PrimaryVideo = selectPrimaryVideo(b.AllVideos, preferredLayout)
+	}
 	return b, nil
 }
 

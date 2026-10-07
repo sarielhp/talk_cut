@@ -16,9 +16,13 @@ import (
 	"talk_cut/internal/config"
 	"talk_cut/internal/cutter"
 	"talk_cut/internal/model"
+	"talk_cut/internal/transcript"
 	"talk_cut/internal/vtt"
 	"talk_cut/internal/youtube"
 )
+
+// cleanTranscriptFile is the filename written by the clean transcript export.
+const cleanTranscriptFile = "clean_transcript.md"
 
 // Screen represents the currently active view.
 type Screen int
@@ -47,6 +51,12 @@ type cutDoneMsg struct {
 
 type aiChaptersMsg struct {
 	chapters []model.ChapterMarker
+	err      error
+}
+
+type cleanTranscriptMsg struct {
+	path     string
+	polished bool
 	err      error
 }
 
@@ -190,6 +200,8 @@ func (a AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return a, nil
 	case aiChaptersMsg:
 		return a.handleAIChaptersMsg(msg)
+	case cleanTranscriptMsg:
+		return a.handleCleanTranscriptMsg(msg)
 	case emlMetadataMsg:
 		return a.handleEMLMetadataMsg(msg)
 	case urlMetadataMsg:
@@ -360,6 +372,8 @@ func (a AppModel) handleCutsKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return a.startRender()
 	case "r", "ctrl+a":
 		return a, a.triggerAIChapters()
+	case "t":
+		return a, a.triggerCleanTranscript()
 	}
 
 	var cmd tea.Cmd
@@ -509,6 +523,89 @@ func (a *AppModel) triggerAIChapters() tea.Cmd {
 		chapters, err := ai.DetectChapters(ctx, client, kept, meta.Title, meta.Abstract)
 		return aiChaptersMsg{chapters: chapters, err: err}
 	}
+}
+
+// handleCleanTranscriptMsg reports the result of the clean transcript export.
+func (a *AppModel) handleCleanTranscriptMsg(msg cleanTranscriptMsg) (tea.Model, tea.Cmd) {
+	if msg.err != nil {
+		a.cutsView.SetFeedback(fmt.Sprintf("Clean transcript error: %v", msg.err), true)
+		return *a, clearStatusCmd()
+	}
+	note := "local cleanup"
+	if msg.polished {
+		note = "local + AI polish"
+	}
+	a.cutsView.SetFeedback(fmt.Sprintf("Clean transcript saved: %s (%s)", msg.path, note), false)
+	return *a, clearStatusCmd()
+}
+
+// triggerCleanTranscript dispatches a background task that cleans the kept cues
+// locally and then asks the AI model to polish the result.
+func (a *AppModel) triggerCleanTranscript() tea.Cmd {
+	var kept []model.SubtitleCue
+	for _, c := range a.cutsView.Cues() {
+		if c.Action != model.ActionCut {
+			kept = append(kept, c)
+		}
+	}
+	if len(kept) == 0 {
+		a.cutsView.SetFeedback("Cannot export transcript: all cues cut", true)
+		return clearStatusCmd()
+	}
+	model.NameDominantSpeaker(kept, a.metaView.Metadata().Speaker)
+
+	a.cutsView.SetFeedback("Cleaning transcript and polishing with AI...", false)
+
+	title := a.metaView.Metadata().Title
+	dir := a.bundle.Dir
+	if dir == "" {
+		dir = "."
+	}
+
+	return func() tea.Msg {
+		body := transcript.Build(kept, transcript.Options{DropFillers: true})
+		polished := false
+		if out, ok := polishCleanTranscript(body, title); ok {
+			body = out
+			polished = true
+		}
+
+		path := filepath.Join(dir, cleanTranscriptFile)
+		if err := os.WriteFile(path, []byte(withTitle(title, body)+"\n"), 0o644); err != nil {
+			return cleanTranscriptMsg{err: err}
+		}
+		return cleanTranscriptMsg{path: path, polished: polished}
+	}
+}
+
+// polishCleanTranscript best-effort runs the AI polish step, returning false on any failure.
+func polishCleanTranscript(body, title string) (string, bool) {
+	cfg, err := config.LoadConfig()
+	if err != nil {
+		return body, false
+	}
+	client, err := ai.NewClient(cfg)
+	if err != nil {
+		return body, false
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
+	defer cancel()
+
+	out, err := ai.PolishTranscript(ctx, client, body, title)
+	if err != nil || strings.TrimSpace(out) == "" {
+		return body, false
+	}
+	return out, true
+}
+
+// withTitle prepends a markdown heading when a talk title is available.
+func withTitle(title, body string) string {
+	title = strings.TrimSpace(title)
+	if title == "" {
+		return body
+	}
+	return "# " + title + "\n\n" + body
 }
 
 // startRender switches to progress view and fires the background cut pipeline.
