@@ -302,8 +302,8 @@ func TestCardLayoutStealsLinesFromTranscript(t *testing.T) {
 	tall.SetDimensions(100, 40)
 	tall.setCursor(0)
 	_, _, tallInner := tall.cardLayout()
-	if tallInner != 1+maxPreviewLines {
-		t.Errorf("preview should cap at %d text lines, got card inner=%d", maxPreviewLines, tallInner)
+	if want := len(tall.bottomCardContent(cues[0])); tallInner != want {
+		t.Errorf("tall terminal should show the full card content: got inner=%d, want %d", tallInner, want)
 	}
 
 	short := NewCutsModel(cues, media, "x.mp4", "")
@@ -316,12 +316,36 @@ func TestCardLayoutStealsLinesFromTranscript(t *testing.T) {
 	if shortBody > 4 {
 		t.Errorf("expected card to steal lines on a short terminal, body=%d", shortBody)
 	}
-	if shortInner != 1+maxPreviewLines {
-		t.Errorf("short terminal should still show the full preview, got card inner=%d", shortInner)
+	if want := len(short.bottomCardContent(cues[0])); shortInner != want {
+		t.Errorf("short terminal should still show the full preview: got inner=%d, want %d", shortInner, want)
 	}
 
 	if got := len(strings.Split(short.View(), "\n")); got != 14 {
 		t.Errorf("expected exact height 14, got %d", got)
+	}
+}
+
+func TestCardShowsFullTextWithLongReason(t *testing.T) {
+	longText := strings.Repeat("word ", 40) + "FINALTOKEN"
+	cues := []model.SubtitleCue{{
+		ID: 1, Start: 0, End: time.Second, Speaker: "Alice", Text: longText,
+		Action:    model.ActionCut,
+		CutReason: "Preamble/Intro fluff: Host introduction and speaker's initial pleasantries and technical checks.",
+	}}
+	m := NewCutsModel(cues, cutter.MediaInfo{Duration: time.Second}, "x.mp4", "")
+	m.SetDimensions(100, 40)
+	m.setCursor(0)
+
+	_, _, inner := m.cardLayout()
+	if want := len(m.bottomCardContent(cues[0])); inner != want {
+		t.Fatalf("card inner=%d, content lines=%d", inner, want)
+	}
+	card := m.renderBottomCueCard(100, inner)
+	if !strings.Contains(card, "FINALTOKEN") {
+		t.Errorf("bottom card dropped trailing text; got:\n%s", card)
+	}
+	if got := len(strings.Split(card, "\n")); got != inner+2 {
+		t.Errorf("card height=%d, want %d", got, inner+2)
 	}
 }
 

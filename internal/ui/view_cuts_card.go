@@ -47,17 +47,15 @@ func clampHeight(content string, maxLines int) string {
 }
 
 const (
-	// maxPreviewLines caps how many wrapped text lines the bottom cue card shows.
-	maxPreviewLines = 5
 	// minTranscriptBody keeps a minimal number of transcript rows visible so
 	// navigation stays usable even when the bottom card grows.
 	minTranscriptBody = 3
 )
 
 // cardLayout computes the transcript body height and the bottom cue card
-// dimensions for the active cue. The card grows to show the cue's full text
-// (up to maxPreviewLines) and takes those lines from the transcript pane,
-// keeping only minTranscriptBody rows available above.
+// dimensions for the active cue. The card grows to show the cue's full text and
+// takes those lines from the transcript pane, keeping only minTranscriptBody
+// rows available above.
 func (m CutsModel) cardLayout() (bodyHeight, cardHeight, innerLines int) {
 	if len(m.cues) == 0 || m.cursor < 0 || m.cursor >= len(m.cues) {
 		bodyHeight = m.height - 2
@@ -67,11 +65,9 @@ func (m CutsModel) cardLayout() (bodyHeight, cardHeight, innerLines int) {
 		return bodyHeight, 0, 0
 	}
 
-	textLines := m.wrapCueText(m.cues[m.cursor])
-	if len(textLines) > maxPreviewLines {
-		textLines = textLines[:maxPreviewLines]
-	}
-	innerLines = 1 + len(textLines) // metadata line plus preview lines
+	// Size the card from the actual wrapped content (metadata header plus full
+	// text) so the height budget always matches what renderBottomCueCard draws.
+	innerLines = len(m.bottomCardContent(m.cues[m.cursor]))
 
 	// Header and footer occupy 2 lines, the card border 2 more; keep a minimal
 	// transcript pane so the card cannot starve the list entirely.
@@ -94,21 +90,108 @@ func (m CutsModel) cardLayout() (bodyHeight, cardHeight, innerLines int) {
 	return bodyHeight, cardHeight, innerLines
 }
 
-// wrapCueText wraps the active cue's full text (speaker prefix and quotes) to
-// the bottom card's inner width.
-func (m CutsModel) wrapCueText(cue model.SubtitleCue) []string {
+// bottomCardInnerWidth returns the usable content width inside the bottom card,
+// i.e. the terminal width minus the box border and horizontal padding.
+func (m CutsModel) bottomCardInnerWidth() int {
 	innerWidth := m.width - 4
 	if innerWidth < 20 {
 		innerWidth = 20
 	}
+	return innerWidth
+}
+
+// ellipsize shortens s so the result, including a trailing "...", fits in width
+// display columns. It always appends the ellipsis.
+func ellipsize(s string, width int) string {
+	if width <= 3 {
+		return "..."
+	}
+	runes := []rune(s)
+	for len(runes) > 0 && lipgloss.Width(string(runes)+"...") > width {
+		runes = runes[:len(runes)-1]
+	}
+	return string(runes) + "..."
+}
+
+// wrapCueText wraps the active cue's full text (speaker prefix and quotes) to
+// the bottom card's inner width.
+func (m CutsModel) wrapCueText(cue model.SubtitleCue) []string {
+	innerWidth := m.bottomCardInnerWidth()
 
 	speakerPrefix := ""
 	if cue.Speaker != "" {
-		speakerPrefix = cue.Speaker + ": "
+		speakerPrefix = m.theme.SpeakerStyle.Render(cue.Speaker+": ") + " "
 	}
 	fullText := speakerPrefix + "\"" + cue.Text + "\""
 
 	return strings.Split(lipgloss.NewStyle().Width(innerWidth).Render(fullText), "\n")
+}
+
+// bottomCardContent returns the exact wrapped content lines of the bottom cue
+// card: the metadata header followed by the cue's full text. cardLayout and
+// renderBottomCueCard both rely on this so the height budget always matches the
+// drawn card and no text line is ever dropped.
+func (m CutsModel) bottomCardContent(cue model.SubtitleCue) []string {
+	innerWidth := m.bottomCardInnerWidth()
+	header := strings.Split(
+		lipgloss.NewStyle().Width(innerWidth).Render(m.bottomCardHeader(cue)),
+		"\n",
+	)
+	content := make([]string, 0, len(header)+4)
+	content = append(content, header...)
+	content = append(content, m.wrapCueText(cue)...)
+	return content
+}
+
+// bottomCardHeader builds the metadata line for the bottom cue card. The cut
+// reason is truncated so the header stays on a single line and never steals a
+// line from the cue text.
+func (m CutsModel) bottomCardHeader(cue model.SubtitleCue) string {
+	statusBadge := m.theme.BadgeKept.Render(" ✔ KEEP ")
+	if cue.Action == model.ActionCut {
+		statusBadge = m.theme.BadgeCut.Render(" ✂ CUT ")
+	} else if cue.Action == model.ActionReview {
+		statusBadge = m.theme.BadgeReview.Render(" ? REVIEW ")
+	}
+
+	hasFeedback := !m.savedAt.IsZero() && time.Since(m.savedAt) < 4*time.Second && m.saveFeedback != ""
+	if hasFeedback {
+		if m.saveIsError {
+			statusBadge += " " + m.theme.BadgeCut.Render(" ✗ ERROR ")
+		} else if strings.Contains(m.saveFeedback, "Playing") {
+			statusBadge += " " + m.theme.TitleStyle.Render(" ▶ PLAYING ")
+		} else {
+			statusBadge += " " + m.theme.BadgeKept.Render(" ✔ SAVED ")
+		}
+	}
+
+	durSec := fmt.Sprintf("%.2fs", cue.Duration().Seconds())
+	if ok, ch := m.isChapterStart(cue); ok {
+		statusBadge += " " + m.theme.TitleStyle.Render(" 🔖 "+ch.Title+" ")
+	}
+
+	header := fmt.Sprintf(
+		"Cue #%d of %d  [%s -> %s] (%s)  %s",
+		m.cursor+1,
+		len(m.cues),
+		vtt.FormatTimestampShort(cue.Start),
+		vtt.FormatTimestampShort(cue.End),
+		durSec,
+		statusBadge,
+	)
+
+	if cue.CutReason != "" {
+		label := m.theme.HelpDesc.Render("  Reason: ")
+		avail := m.bottomCardInnerWidth() - lipgloss.Width(header) - lipgloss.Width(label)
+		if avail > 10 {
+			reason := cue.CutReason
+			if lipgloss.Width(reason) > avail {
+				reason = ellipsize(reason, avail)
+			}
+			header += label + m.theme.HelpDesc.Render(reason)
+		}
+	}
+	return header
 }
 
 // renderStatsBox formats the duration and cut statistics.
@@ -163,80 +246,18 @@ func (m CutsModel) renderBottomCueCard(width, innerLines int) string {
 	if len(m.cues) == 0 || m.cursor < 0 || m.cursor >= len(m.cues) {
 		return ""
 	}
-	cue := m.cues[m.cursor]
-
-	statusBadge := m.theme.BadgeKept.Render(" ✔ KEEP ")
-	if cue.Action == model.ActionCut {
-		statusBadge = m.theme.BadgeCut.Render(" ✂ CUT ")
-	} else if cue.Action == model.ActionReview {
-		statusBadge = m.theme.BadgeReview.Render(" ? REVIEW ")
+	if innerLines < 1 {
+		innerLines = 1
 	}
 
-	hasFeedback := !m.savedAt.IsZero() && time.Since(m.savedAt) < 4*time.Second && m.saveFeedback != ""
-	if hasFeedback {
-		if m.saveIsError {
-			statusBadge += " " + m.theme.BadgeCut.Render(" ✗ ERROR ")
-		} else if strings.Contains(m.saveFeedback, "Playing") {
-			statusBadge += " " + m.theme.TitleStyle.Render(" ▶ PLAYING ")
-		} else {
-			statusBadge += " " + m.theme.BadgeKept.Render(" ✔ SAVED ")
-		}
-	}
-
-	durSec := fmt.Sprintf("%.2fs", cue.Duration().Seconds())
-	if ok, ch := m.isChapterStart(cue); ok {
-		statusBadge += " " + m.theme.TitleStyle.Render(" 🔖 "+ch.Title+" ")
-	}
-	line1 := fmt.Sprintf(
-		"Cue #%d of %d  [%s -> %s] (%s)  %s",
-		m.cursor+1,
-		len(m.cues),
-		vtt.FormatTimestampShort(cue.Start),
-		vtt.FormatTimestampShort(cue.End),
-		durSec,
-		statusBadge,
-	)
-
-	innerWidth := width - 4
-	if innerWidth < 20 {
-		innerWidth = 20
-	}
-
-	if cue.CutReason != "" {
-		avail := innerWidth - len(durSec) - 45
-		if avail > 10 {
-			reason := cue.CutReason
-			if len(reason) > avail {
-				reason = reason[:avail-3] + "..."
-			}
-			line1 += "  " + m.theme.HelpDesc.Render("Reason: "+reason)
-		}
-	}
-
-	speakerPrefix := ""
-	if cue.Speaker != "" {
-		speakerPrefix = m.theme.SpeakerStyle.Render(cue.Speaker+": ") + " "
-	}
-	fullText := speakerPrefix + "\"" + cue.Text + "\""
-
-	wrapped := lipgloss.NewStyle().Width(innerWidth).Render(fullText)
-	textLines := strings.Split(wrapped, "\n")
-
-	maxTextLines := innerLines - 1
-	if maxTextLines < 1 {
-		maxTextLines = 1
-	}
-	if len(textLines) > maxTextLines {
-		textLines = textLines[:maxTextLines]
-		lastIdx := maxTextLines - 1
-		if len(textLines[lastIdx]) > 3 {
-			textLines[lastIdx] = textLines[lastIdx][:len(textLines[lastIdx])-3] + "..."
-		}
-	}
-
-	contentLines := append([]string{line1}, textLines...)
+	innerWidth := m.bottomCardInnerWidth()
+	contentLines := m.bottomCardContent(m.cues[m.cursor])
 	if len(contentLines) > innerLines {
 		contentLines = contentLines[:innerLines]
+		last := len(contentLines) - 1
+		if last >= 0 {
+			contentLines[last] = ellipsize(contentLines[last], innerWidth)
+		}
 	}
 
 	cardContent := strings.Join(contentLines, "\n")
