@@ -334,7 +334,7 @@ func (m CutsModel) renderFloatingHelpDialog(width int) string {
 		"  g / G       Jump top / bottom          s / Ctrl+S  Save cuts to disk",
 		"  pgdn / pgup Page down / up             p           Preview cue (ffplay)",
 		"  n / N       Jump next / prev cut       c / Ctrl+R  Commit cuts & render",
-		"  t           Clean transcript (AI)      r / Ctrl+A  Redo chapters with AI",
+		"  t (Render)  Clean transcript (AI)     r / Ctrl+A  Redo chapters with AI",
 		"  q / Ctrl+C  Quit talk_cut              F1 / ?      Toggle help modal",
 	}
 

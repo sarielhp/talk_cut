@@ -219,6 +219,7 @@ talk_cut youtube playlist add "Geometry Seminar Fall 2026" examples/26_09_08/
 | Key | Action |
 |---|---|
 | <kbd>c</kbd> / <kbd>Enter</kbd> | Start FFmpeg lossless slice & concat pipeline |
+| <kbd>t</kbd> | Generate `<talk>_cut_transcript.md` from the kept cues (YouTube metadata + AI-polished transcript). Works before rendering and for already-rendered/uploaded talks |
 | <kbd>u</kbd> (when complete) | Switch directly to `[5] YouTube` upload screen |
 | <kbd>p</kbd> (when complete) | Play cut video in external video player (`ffplay`) |
 | <kbd>Esc</kbd> (before render) | Return to Cut Review screen |
@@ -413,6 +414,7 @@ Running `talk_cut` generates the following files in the recording directory:
 |---|---|
 | `<talk>_cut.mp4` | Final losslessly sliced and spliced video file |
 | `<talk>_cut.vtt` | Synchronized, retimed WebVTT subtitle transcript |
+| `<talk>_cut_transcript.md` | Full talk document: YouTube metadata (title, speaker, abstract, tags, chapters) plus the kept-only cleaned transcript (local cleanup + best-effort AI polish) |
 | `<talk>_chapters.txt` | YouTube-formatted chapter descriptions (guaranteed `00:00` start) |
 | `talk_cuts.json` | Persistent cut intervals database (auto-loaded on re-runs) |
 | `talk_meta.json` | Talk metadata cache (title, speaker, abstract, tags, URL, YouTube ID, short URL, playlists) |

@@ -725,7 +725,7 @@ func (m CutsModel) renderDefaultHints(availWidth int) string {
 	msg := m.statusMsg
 	if msg == "" {
 		if availWidth >= 75 {
-			msg = "j/k: nav | Space: cut/keep | Tab: chapter | c: commit cut | t: transcript | p: preview | F1: help"
+			msg = "j/k: nav | Space: cut/keep | Tab: chapter | c: commit cut | p: preview | F1: help"
 		} else if availWidth >= 55 {
 			msg = "j/k: nav | Space: cut/keep | Tab: chapter | c: commit cut | F1: help"
 		} else if availWidth >= 30 {

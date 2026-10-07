@@ -3,6 +3,8 @@ package ui
 
 import (
 	"errors"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -172,36 +174,106 @@ func TestAppModelChapterJumpKeys(t *testing.T) {
 	}
 }
 
-func TestAppModelCleanTranscriptKey(t *testing.T) {
+func TestAppModelTranscriptKeyOnRender(t *testing.T) {
 	b := bundle.RecordingBundle{Dir: t.TempDir(), PrimaryVideo: "test_video.mp4"}
 	media := cutter.MediaInfo{Duration: 60 * time.Second}
 	app := NewAppModel(b, media, makeTestCues(), model.TalkMetadata{Title: "Test Talk"}, "output.mp4")
 	app.handleWindowSize(tea.WindowSizeMsg{Width: 100, Height: 30})
+	app.screen = ScreenProg
 
 	_, cmd := app.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("t")})
 	if cmd == nil {
-		t.Fatalf("expected a command to be returned for the clean transcript key")
+		t.Fatalf("expected a command to be returned for the transcript key on the render screen")
 	}
 }
 
-func TestAppModelCleanTranscriptMsgFeedback(t *testing.T) {
+func TestAppModelTranscriptMsgFeedback(t *testing.T) {
 	b := bundle.RecordingBundle{Dir: t.TempDir(), PrimaryVideo: "test_video.mp4"}
 	media := cutter.MediaInfo{Duration: 60 * time.Second}
 	app := NewAppModel(b, media, makeTestCues(), model.TalkMetadata{Title: "Test Talk"}, "output.mp4")
 	app.handleWindowSize(tea.WindowSizeMsg{Width: 100, Height: 30})
 
-	res, _ := app.Update(cleanTranscriptMsg{path: "/tmp/clean_transcript.md", polished: true})
+	res, _ := app.Update(transcriptMsg{path: "/tmp/out_transcript.md", polished: true})
 	app = res.(AppModel)
-	if !strings.Contains(app.cutsView.saveFeedback, "local + AI polish") {
-		t.Errorf("expected success feedback mentioning AI polish, got %q", app.cutsView.saveFeedback)
+	if !strings.Contains(app.progView.feedback, "local + AI polish") {
+		t.Errorf("expected success feedback mentioning AI polish, got %q", app.progView.feedback)
 	}
-	if app.cutsView.saveIsError {
+	if app.progView.feedbackErr {
 		t.Errorf("expected non-error feedback")
 	}
 
-	res, _ = app.Update(cleanTranscriptMsg{err: errCleanTranscriptTest})
+	res, _ = app.Update(transcriptMsg{err: errCleanTranscriptTest})
 	app = res.(AppModel)
-	if !app.cutsView.saveIsError {
+	if !app.progView.feedbackErr {
 		t.Errorf("expected error feedback on failure")
+	}
+}
+
+func TestBuildTalkDocIncludesMetadataAndTranscript(t *testing.T) {
+	meta := model.TalkMetadata{
+		Title:       "Diversity in Metric Spaces",
+		Speaker:     "Marc van Kreveld",
+		Affiliation: "Utrecht University",
+		URL:         "https://example.org/talk",
+		Privacy:     "public",
+		Tags:        []string{"geometry", "diversity"},
+		Abstract:    "A talk about diversity measures.",
+		Chapters: []model.ChapterMarker{
+			{AdjustedTime: 0, Title: "Introduction"},
+			{AdjustedTime: 90 * time.Second, Title: "Shannon Index"},
+		},
+	}
+
+	doc := buildTalkDoc(meta, "Marc van Kreveld: Hello and welcome.")
+	for _, want := range []string{
+		"# Diversity in Metric Spaces",
+		"**Speaker:** Marc van Kreveld (Utrecht University)",
+		"**Talk URL:** https://example.org/talk",
+		"**Privacy:** public",
+		"**Tags:** geometry, diversity",
+		"## Abstract",
+		"A talk about diversity measures.",
+		"## Chapters",
+		"00:00 Introduction",
+		"01:30 Shannon Index",
+		"## Transcript",
+		"Marc van Kreveld: Hello and welcome.",
+	} {
+		if !strings.Contains(doc, want) {
+			t.Errorf("talk doc missing %q\n---\n%s", want, doc)
+		}
+	}
+}
+
+func TestGenerateTranscriptKeepsOnlySurvivingText(t *testing.T) {
+	dir := t.TempDir()
+	outBase := filepath.Join(dir, "out")
+	cues := []model.SubtitleCue{
+		{ID: 1, Speaker: "Alice", Text: "Cut this entirely.", Action: model.ActionCut},
+		{ID: 2, Speaker: "Alice", Text: "Keep this sentence.", Action: model.ActionKeep},
+	}
+	meta := model.TalkMetadata{Title: "Test Talk"}
+
+	path, polished, err := generateTranscript(outBase, cues, meta, false)
+	if err != nil {
+		t.Fatalf("generateTranscript: %v", err)
+	}
+	if polished {
+		t.Errorf("polished should be false when polish=false")
+	}
+	if want := outBase + transcriptSuffix; path != want {
+		t.Errorf("path = %q, want %q", path, want)
+	}
+
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read transcript: %v", err)
+	}
+	doc := string(data)
+	if strings.Contains(doc, "Cut this entirely") {
+		t.Errorf("cut cue leaked into transcript:\n%s", doc)
+	}
+	if !strings.Contains(doc, "Keep this sentence") {
+		t.Errorf("kept cue missing from transcript:\n%s", doc)
 	}
 }

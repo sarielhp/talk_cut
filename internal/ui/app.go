@@ -16,13 +16,13 @@ import (
 	"talk_cut/internal/config"
 	"talk_cut/internal/cutter"
 	"talk_cut/internal/model"
-	"talk_cut/internal/transcript"
 	"talk_cut/internal/vtt"
 	"talk_cut/internal/youtube"
 )
 
-// cleanTranscriptFile is the filename written by the clean transcript export.
-const cleanTranscriptFile = "clean_transcript.md"
+// transcriptSuffix is appended to the rendered output base for the talk document
+// (YouTube metadata plus the kept-only cleaned transcript).
+const transcriptSuffix = "_transcript.md"
 
 // Screen represents the currently active view.
 type Screen int
@@ -43,10 +43,11 @@ const (
 type progressMsg cutter.CutProgress
 
 type cutDoneMsg struct {
-	err          error
-	videoPath    string
-	chaptersPath string
-	vttPath      string
+	err            error
+	videoPath      string
+	chaptersPath   string
+	vttPath        string
+	transcriptPath string
 }
 
 type aiChaptersMsg struct {
@@ -54,7 +55,7 @@ type aiChaptersMsg struct {
 	err      error
 }
 
-type cleanTranscriptMsg struct {
+type transcriptMsg struct {
 	path     string
 	polished bool
 	err      error
@@ -163,7 +164,8 @@ func (a AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		a.isCutting = false
 		a.progView.SetDone(msg.err)
 		if msg.err == nil {
-			a.progView.SetOutputPaths(msg.videoPath, msg.chaptersPath, msg.vttPath)
+			a.progView.SetOutputPaths(msg.videoPath, msg.chaptersPath, msg.vttPath, msg.transcriptPath)
+			return a, a.polishTranscriptCmd(msg.videoPath)
 		}
 		return a, nil
 	case ytProgressMsg:
@@ -200,8 +202,8 @@ func (a AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return a, nil
 	case aiChaptersMsg:
 		return a.handleAIChaptersMsg(msg)
-	case cleanTranscriptMsg:
-		return a.handleCleanTranscriptMsg(msg)
+	case transcriptMsg:
+		return a.handleTranscriptMsg(msg)
 	case emlMetadataMsg:
 		return a.handleEMLMetadataMsg(msg)
 	case urlMetadataMsg:
@@ -372,8 +374,6 @@ func (a AppModel) handleCutsKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return a.startRender()
 	case "r", "ctrl+a":
 		return a, a.triggerAIChapters()
-	case "t":
-		return a, a.triggerCleanTranscript()
 	}
 
 	var cmd tea.Cmd
@@ -455,6 +455,8 @@ func (a AppModel) handleProgKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			return a, nil
 		case "c", "enter":
 			return a.startRender()
+		case "t":
+			return a, a.triggerTranscript()
 		case "q":
 			a.cutsView.Close()
 			return a, tea.Quit
@@ -523,89 +525,6 @@ func (a *AppModel) triggerAIChapters() tea.Cmd {
 		chapters, err := ai.DetectChapters(ctx, client, kept, meta.Title, meta.Abstract)
 		return aiChaptersMsg{chapters: chapters, err: err}
 	}
-}
-
-// handleCleanTranscriptMsg reports the result of the clean transcript export.
-func (a *AppModel) handleCleanTranscriptMsg(msg cleanTranscriptMsg) (tea.Model, tea.Cmd) {
-	if msg.err != nil {
-		a.cutsView.SetFeedback(fmt.Sprintf("Clean transcript error: %v", msg.err), true)
-		return *a, clearStatusCmd()
-	}
-	note := "local cleanup"
-	if msg.polished {
-		note = "local + AI polish"
-	}
-	a.cutsView.SetFeedback(fmt.Sprintf("Clean transcript saved: %s (%s)", msg.path, note), false)
-	return *a, clearStatusCmd()
-}
-
-// triggerCleanTranscript dispatches a background task that cleans the kept cues
-// locally and then asks the AI model to polish the result.
-func (a *AppModel) triggerCleanTranscript() tea.Cmd {
-	var kept []model.SubtitleCue
-	for _, c := range a.cutsView.Cues() {
-		if c.Action != model.ActionCut {
-			kept = append(kept, c)
-		}
-	}
-	if len(kept) == 0 {
-		a.cutsView.SetFeedback("Cannot export transcript: all cues cut", true)
-		return clearStatusCmd()
-	}
-	model.NameDominantSpeaker(kept, a.metaView.Metadata().Speaker)
-
-	a.cutsView.SetFeedback("Cleaning transcript and polishing with AI...", false)
-
-	title := a.metaView.Metadata().Title
-	dir := a.bundle.Dir
-	if dir == "" {
-		dir = "."
-	}
-
-	return func() tea.Msg {
-		body := transcript.Build(kept, transcript.Options{DropFillers: true})
-		polished := false
-		if out, ok := polishCleanTranscript(body, title); ok {
-			body = out
-			polished = true
-		}
-
-		path := filepath.Join(dir, cleanTranscriptFile)
-		if err := os.WriteFile(path, []byte(withTitle(title, body)+"\n"), 0o644); err != nil {
-			return cleanTranscriptMsg{err: err}
-		}
-		return cleanTranscriptMsg{path: path, polished: polished}
-	}
-}
-
-// polishCleanTranscript best-effort runs the AI polish step, returning false on any failure.
-func polishCleanTranscript(body, title string) (string, bool) {
-	cfg, err := config.LoadConfig()
-	if err != nil {
-		return body, false
-	}
-	client, err := ai.NewClient(cfg)
-	if err != nil {
-		return body, false
-	}
-
-	ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
-	defer cancel()
-
-	out, err := ai.PolishTranscript(ctx, client, body, title)
-	if err != nil || strings.TrimSpace(out) == "" {
-		return body, false
-	}
-	return out, true
-}
-
-// withTitle prepends a markdown heading when a talk title is available.
-func withTitle(title, body string) string {
-	title = strings.TrimSpace(title)
-	if title == "" {
-		return body
-	}
-	return "# " + title + "\n\n" + body
 }
 
 // startRender switches to progress view and fires the background cut pipeline.
@@ -712,7 +631,7 @@ func runCutWorker(
 		return
 	}
 
-	outBase := strings.TrimSuffix(outVideo, filepath.Ext(outVideo))
+	outBase := outputBase(outVideo)
 	chaptersPath := outBase + "_chapters.txt"
 	vttPath := outBase + ".vtt"
 
@@ -724,10 +643,16 @@ func runCutWorker(
 	writeChaptersFile(chaptersPath, normalized)
 	writeAdjustedVTT(vttPath, cues, cuts)
 
+	// Write the talk document (YouTube metadata + kept-only transcript) locally
+	// so it exists the moment rendering finishes; the AI polish pass upgrades it
+	// afterwards without blocking completion.
+	transcriptPath, _, _ := generateTranscript(outBase, cues, meta, false)
+
 	doneChan <- cutDoneMsg{
-		videoPath:    outVideo,
-		chaptersPath: chaptersPath,
-		vttPath:      vttPath,
+		videoPath:      outVideo,
+		chaptersPath:   chaptersPath,
+		vttPath:        vttPath,
+		transcriptPath: transcriptPath,
 	}
 }
 

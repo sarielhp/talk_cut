@@ -17,24 +17,27 @@ import (
 
 // ProgModel manages the FFmpeg video cutting progress and completion screen.
 type ProgModel struct {
-	theme        Theme
-	progBar      progress.Model
-	stage        string
-	percent      float64
-	detail       string
-	done         bool
-	err          error
-	outputPath   string
-	chaptersPath string
-	vttPath      string
-	talkMeta     model.TalkMetadata
-	cuts         []model.CutInterval
-	stats        model.CutStats
-	inputVideo   string
-	isCutting    bool
-	width        int
-	height       int
-	statusMsg    string
+	theme          Theme
+	progBar        progress.Model
+	stage          string
+	percent        float64
+	detail         string
+	done           bool
+	err            error
+	outputPath     string
+	chaptersPath   string
+	vttPath        string
+	transcriptPath string
+	talkMeta       model.TalkMetadata
+	cuts           []model.CutInterval
+	stats          model.CutStats
+	inputVideo     string
+	isCutting      bool
+	width          int
+	height         int
+	statusMsg      string
+	feedback       string
+	feedbackErr    bool
 }
 
 // NewProgModel creates an initialized ProgModel.
@@ -72,10 +75,17 @@ func (m *ProgModel) SetDimensions(w, h int) {
 }
 
 // SetOutputPaths configures the exported artifact paths upon completion.
-func (m *ProgModel) SetOutputPaths(video, chapters, vtt string) {
+func (m *ProgModel) SetOutputPaths(video, chapters, vtt, transcript string) {
 	m.outputPath = video
 	m.chaptersPath = chapters
 	m.vttPath = vtt
+	m.transcriptPath = transcript
+}
+
+// SetFeedback sets a temporary notification shown on the render screen.
+func (m *ProgModel) SetFeedback(msg string, isError bool) {
+	m.feedback = msg
+	m.feedbackErr = isError
 }
 
 // SetPreflight updates the pre-flight export review information.
@@ -203,15 +213,21 @@ func (m ProgModel) renderBody() string {
 	if m.done {
 		lines := []string{
 			m.theme.SuccessText.Bold(true).Render("✔ SPLICING & EXPORT COMPLETE"),
-			fmt.Sprintf("Video:    %s", m.outputPath),
+			fmt.Sprintf("Video:      %s", m.outputPath),
 		}
 		if m.chaptersPath != "" {
-			lines = append(lines, fmt.Sprintf("Chapters: %s", m.chaptersPath))
+			lines = append(lines, fmt.Sprintf("Chapters:   %s", m.chaptersPath))
 		}
 		if m.vttPath != "" {
-			lines = append(lines, fmt.Sprintf("Subtitles: %s", m.vttPath))
+			lines = append(lines, fmt.Sprintf("Subtitles:  %s", m.vttPath))
 		}
-		lines = append(lines, "", "[p] Preview Video    [u] Upload to YouTube (Tab 5)    [q] Exit talk_cut")
+		if m.transcriptPath != "" {
+			lines = append(lines, fmt.Sprintf("Transcript: %s", m.transcriptPath))
+		}
+		if m.feedback != "" {
+			lines = append(lines, "", m.renderFeedback())
+		}
+		lines = append(lines, "", "[p] Preview Video   [t] Transcript   [u] Upload to YouTube (Tab 5)   [q] Exit")
 
 		content := strings.Join(lines, "\n")
 		box := m.theme.SidebarBox.Width(m.width - 4).Render(content)
@@ -265,21 +281,33 @@ func (m ProgModel) renderPreflightBox() string {
 		),
 		fmt.Sprintf("YouTube Chapters:  %d chapter markers defined", len(m.talkMeta.Chapters)),
 		"",
-		lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("#FFFFFF")).Background(lipgloss.Color("#10B981")).Padding(0, 2).Render(" Press [c] or [Enter] to Start Video Rendering "),
 	}
+	if m.feedback != "" {
+		lines = append(lines, m.renderFeedback(), "")
+	}
+	lines = append(lines, lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("#FFFFFF")).Background(lipgloss.Color("#10B981")).Padding(0, 2).Render(" Press [c] or [Enter] to Start Video Rendering "))
 
 	content := strings.Join(lines, "\n")
 	box := m.theme.SidebarBox.Width(boxWidth).Render(content)
 	return lipgloss.NewStyle().MarginLeft(2).Render(box)
 }
 
+// renderFeedback styles the transient status line shown on the render screen.
+func (m ProgModel) renderFeedback() string {
+	style := m.theme.SuccessText
+	if m.feedbackErr {
+		style = m.theme.DangerText
+	}
+	return style.Render(m.feedback)
+}
+
 // renderFooter renders the bottom status bar.
 func (m ProgModel) renderFooter() string {
 	msg := m.statusMsg
 	if !m.isCutting && !m.done && m.err == nil {
-		msg = "Enter / c: start rendering | ←/→: switch tabs | Esc: cuts review"
+		msg = "Enter / c: start rendering | t: transcript | ←/→: switch tabs | Esc: cuts review"
 	} else if m.done && m.err == nil {
-		msg = "p: preview video | u: upload to YouTube (Tab 5) | ←/→: switch tabs | q: exit"
+		msg = "p: preview video | t: transcript | u: upload to YouTube (Tab 5) | ←/→: switch tabs | q: exit"
 	}
 	bar := m.theme.HelpDesc.Render(" " + msg)
 	return lipgloss.NewStyle().Width(m.width).MarginTop(1).Render(bar)
