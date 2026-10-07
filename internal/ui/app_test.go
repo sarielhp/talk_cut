@@ -277,3 +277,34 @@ func TestGenerateTranscriptKeepsOnlySurvivingText(t *testing.T) {
 		t.Errorf("kept cue missing from transcript:\n%s", doc)
 	}
 }
+
+func TestGenerateTranscriptEmbedsChapterHeadings(t *testing.T) {
+	dir := t.TempDir()
+	outBase := filepath.Join(dir, "out")
+	cues := []model.SubtitleCue{
+		{ID: 1, Start: 0, End: time.Second, Speaker: "Alice", Text: "Welcome.", Action: model.ActionKeep},
+		{ID: 2, Start: time.Second, End: 2 * time.Second, Speaker: "Alice", Text: "Let us begin.", Action: model.ActionKeep},
+	}
+	meta := model.TalkMetadata{
+		Title: "T",
+		Chapters: []model.ChapterMarker{
+			{OriginalTime: 0, AdjustedTime: 0, Title: "Introduction"},
+		},
+	}
+
+	path, _, err := generateTranscript(outBase, cues, meta, false)
+	if err != nil {
+		t.Fatalf("generateTranscript: %v", err)
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read transcript: %v", err)
+	}
+	doc := string(data)
+	if !strings.Contains(doc, "### Introduction") {
+		t.Errorf("chapter heading missing from transcript body:\n%s", doc)
+	}
+	if !strings.Contains(doc, "## Chapters") || !strings.Contains(doc, "00:00 Introduction") {
+		t.Errorf("chapters section missing:\n%s", doc)
+	}
+}

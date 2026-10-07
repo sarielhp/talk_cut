@@ -13,6 +13,7 @@ import (
 
 	"talk_cut/internal/ai"
 	"talk_cut/internal/config"
+	"talk_cut/internal/cutter"
 	"talk_cut/internal/model"
 	"talk_cut/internal/transcript"
 )
@@ -81,7 +82,10 @@ func generateTranscript(outBase string, cues []model.SubtitleCue, meta model.Tal
 	}
 	model.NameDominantSpeaker(kept, meta.Speaker)
 
-	body := transcript.Build(kept, transcript.Options{DropFillers: true})
+	cuts := model.BuildCutIntervals(cues)
+	meta.Chapters = cutter.AdjustChapters(cutter.AlignChaptersToKeptCues(meta.Chapters, cues), cuts, "Introduction")
+	body := buildTranscriptBody(kept, meta.Chapters, cuts)
+
 	path := outBase + transcriptSuffix
 	if err := writeTalkDoc(path, meta, body); err != nil {
 		return path, false, err
@@ -90,13 +94,44 @@ func generateTranscript(outBase string, cues []model.SubtitleCue, meta model.Tal
 	if !polish {
 		return path, false, nil
 	}
-	if out, ok := polishCleanTranscript(body, meta.Title); ok {
+	// Only accept the polished text when the chapter structure survived intact.
+	if out, ok := polishCleanTranscript(body, meta.Title); ok && headingsPreserved(out, meta.Chapters) {
 		if err := writeTalkDoc(path, meta, out); err != nil {
 			return path, false, err
 		}
 		return path, true, nil
 	}
 	return path, false, nil
+}
+
+// buildTranscriptBody renders the kept cues with adjusted timestamps and chapter
+// headings so the transcript mirrors the cut video's chapter structure.
+func buildTranscriptBody(kept []model.SubtitleCue, chapters []model.ChapterMarker, cuts []model.CutInterval) string {
+	adjusted := make([]model.SubtitleCue, len(kept))
+	copy(adjusted, kept)
+	for i := range adjusted {
+		adjusted[i].Start = cutter.AdjustTime(adjusted[i].Start, cuts)
+	}
+
+	marks := make([]transcript.Chapter, 0, len(chapters))
+	for _, ch := range chapters {
+		marks = append(marks, transcript.Chapter{Start: ch.AdjustedTime, Title: ch.Title})
+	}
+	return transcript.BuildWithChapters(adjusted, marks, transcript.Options{DropFillers: true})
+}
+
+// headingsPreserved reports whether every chapter heading survived the AI pass.
+func headingsPreserved(body string, chapters []model.ChapterMarker) bool {
+	for _, ch := range chapters {
+		title := strings.TrimSpace(ch.Title)
+		if title == "" {
+			continue
+		}
+		if !strings.Contains(body, title) {
+			return false
+		}
+	}
+	return true
 }
 
 // writeTalkDoc writes the assembled talk document to path.

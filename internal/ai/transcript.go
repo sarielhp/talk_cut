@@ -17,10 +17,11 @@ Rewrite the raw transcript into clean, readable prose while preserving meaning a
 Rules:
 1. Remove filler words, false starts, stutters, and accidental repetitions.
 2. Fix punctuation, capitalization, and sentence boundaries.
-3. Merge fragments into coherent sentences and paragraphs.
+3. Break long stretches of speech into readable paragraphs of a few sentences. Start a new paragraph whenever the topic shifts, the speaker pauses, or a new section begins. Never return the whole talk as one giant block of text.
 4. Keep speaker turns: start each turn with the speaker name followed by a colon when a speaker is known.
-5. Never add facts, commentary, headings, or timestamps. Do not summarize.
-6. Preserve technical terms, names, and numbers exactly.
+5. The input may contain "### " section headings on their own lines. Keep every heading exactly as written and in order, each on its own line. Do not invent, rename, merge, reorder, or drop headings, and keep the text that follows each heading inside that section.
+6. Never add facts, commentary, or timestamps. Do not summarize.
+7. Preserve technical terms, names, and numbers exactly.
 
 Return a JSON object matching this schema:
 {

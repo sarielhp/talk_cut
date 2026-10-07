@@ -3,6 +3,7 @@ package transcript
 
 import (
 	"strings"
+	"time"
 	"unicode"
 
 	"talk_cut/internal/model"
@@ -16,24 +17,53 @@ type Options struct {
 	DropFillers bool
 }
 
+// Chapter marks a section boundary in the rendered transcript. Start is the
+// post-cut (adjusted) timestamp at which the section begins.
+type Chapter struct {
+	Start time.Duration
+	Title string
+}
+
 // Build renders kept cues into a clean, timestamp-free prose transcript.
 // Consecutive cues from the same speaker are merged into a single paragraph.
 func Build(cues []model.SubtitleCue, opts Options) string {
-	var paras, curWords []string
+	return BuildWithChapters(cues, nil, opts)
+}
+
+// BuildWithChapters renders kept cues into a chaptered, timestamp-free
+// transcript. Each chapter emits a "### Title" heading and forces a new
+// paragraph; consecutive cues from the same speaker within a chapter are merged.
+// Cues must be ordered by ascending Start and carry adjusted timestamps.
+func BuildWithChapters(cues []model.SubtitleCue, chapters []Chapter, opts Options) string {
+	var blocks []string
+	var curWords []string
 	var curSpeaker string
 
 	flush := func() {
 		if len(curWords) == 0 {
 			return
 		}
-		paras = append(paras, formatParagraph(curSpeaker, curWords))
+		blocks = append(blocks, formatParagraph(curSpeaker, curWords))
 		curWords = nil
+	}
+
+	chIdx := 0
+	emitChapters := func(at time.Duration) {
+		for chIdx < len(chapters) && chapters[chIdx].Start <= at {
+			flush()
+			if title := strings.TrimSpace(chapters[chIdx].Title); title != "" {
+				blocks = append(blocks, "### "+title)
+			}
+			chIdx++
+		}
 	}
 
 	for _, cue := range cues {
 		if !opts.IncludeCutCues && cue.Action == model.ActionCut {
 			continue
 		}
+		emitChapters(cue.Start)
+
 		text := cleanCueText(cue.Text, opts.DropFillers)
 		if text == "" {
 			continue
@@ -46,7 +76,7 @@ func Build(cues []model.SubtitleCue, opts Options) string {
 	}
 	flush()
 
-	return strings.Join(paras, "\n\n")
+	return strings.Join(blocks, "\n\n")
 }
 
 // formatParagraph joins cleaned chunks under an optional speaker label.

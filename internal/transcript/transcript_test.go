@@ -52,6 +52,24 @@ func TestBuildMergesSameSpeaker(t *testing.T) {
 	}
 }
 
+func TestBuildWithChaptersInsertsHeadingsAndBreaks(t *testing.T) {
+	cues := []model.SubtitleCue{
+		mkCue(1, "Alice", "Intro one.", model.ActionKeep),
+		mkCue(2, "Alice", "Intro two.", model.ActionKeep),
+		mkCue(3, "Alice", "Body one.", model.ActionKeep),
+	}
+	chapters := []Chapter{
+		{Start: 0, Title: "Introduction"},
+		{Start: 3 * time.Second, Title: "Main Results"},
+	}
+
+	got := BuildWithChapters(cues, chapters, Options{})
+	want := "### Introduction\n\nAlice: Intro one. Intro two.\n\n### Main Results\n\nAlice: Body one."
+	if got != want {
+		t.Errorf("unexpected chaptered transcript:\n got: %q\nwant: %q", got, want)
+	}
+}
+
 func TestBuildDropsFillersAndRepeats(t *testing.T) {
 	cues := []model.SubtitleCue{mkCue(1, "", "Um, so the the graph is is connected.", model.ActionKeep)}
 
