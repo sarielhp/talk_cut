@@ -308,6 +308,20 @@ func (m PlaylistsModel) indexOf(id string) int {
 	return -1
 }
 
+// SetCopied reports a copied share link, warning when a private playlist cannot be opened by others.
+func (m *PlaylistsModel) SetCopied(pl youtube.Playlist, url string, err error) {
+	if err != nil {
+		m.setFeedback(fmt.Sprintf("Copy failed: %v (link: %s)", err, url), true)
+		return
+	}
+	msg := fmt.Sprintf("✔ Copied link to %q: %s", pl.Title, url)
+	if pl.PrivacyStatus == "private" {
+		m.setFeedback(msg+" — but it is PRIVATE: others cannot open it; make it unlisted or public on YouTube", true)
+		return
+	}
+	m.setFeedback(msg, false)
+}
+
 // BackToList returns from the membership view to the playlist list.
 func (m *PlaylistsModel) BackToList() {
 	m.mode = plModeList
@@ -348,11 +362,11 @@ func (m PlaylistsModel) View() string {
 func (m PlaylistsModel) footerHint() string {
 	switch m.mode {
 	case plModeVideos:
-		return "↑/↓: move | Space/Enter: toggle membership | o: open playlist | r: refresh | Esc: playlists"
+		return "↑/↓: move | Space/Enter: toggle membership | c: copy link | o: open | r: refresh | Esc: playlists"
 	case plModeCreate:
 		return "Enter: create | Tab: cycle privacy | Esc: cancel"
 	}
-	return "↑/↓: move | Enter: open | n: new playlist | o: open in browser | r: refresh | ←/→: tabs"
+	return "↑/↓: move | Enter: open | n: new | c: copy link | o: open in browser | r: refresh | ←/→: tabs"
 }
 
 func (m PlaylistsModel) renderList() string {

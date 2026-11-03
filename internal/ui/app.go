@@ -213,6 +213,9 @@ func (a AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case plCreatedMsg:
 		a.playlistsView.ApplyCreated(msg.channel, msg.playlist, msg.err)
 		return a, nil
+	case plCopiedMsg:
+		a.playlistsView.SetCopied(msg.playlist, playlistURL(msg.playlist.ID), msg.err)
+		return a, nil
 	case plToggledMsg:
 		return a.handlePlaylistToggled(msg)
 	case ytCopiedMsg:

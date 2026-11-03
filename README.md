@@ -264,6 +264,7 @@ Browse the channel's playlists, create new ones, and edit which of the channel's
 | <kbd>Enter</kbd> | Open the selected playlist and show recent uploads with `[✔]` membership marks |
 | <kbd>Space</kbd> / <kbd>Enter</kbd> / <kbd>x</kbd> (in a playlist) | Add or remove the video under the cursor (immediate YouTube API call) |
 | <kbd>n</kbd> | Create a new playlist: type the title, <kbd>Tab</kbd> cycles privacy (public / unlisted / private), <kbd>Enter</kbd> creates, <kbd>Esc</kbd> cancels |
+| <kbd>c</kbd> | Copy the playlist's share link (`https://www.youtube.com/playlist?list=…`) to the clipboard; warns if the playlist is private |
 | <kbd>o</kbd> | Open the selected playlist in the browser |
 | <kbd>r</kbd> | Reload playlists and uploads (or, inside a playlist, its contents) |
 | <kbd>Esc</kbd> | Back to the playlist list (from a playlist) or to Cut Review |

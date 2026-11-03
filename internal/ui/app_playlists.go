@@ -35,6 +35,11 @@ type plToggledMsg struct {
 	err           error
 }
 
+type plCopiedMsg struct {
+	playlist youtube.Playlist
+	err      error
+}
+
 type plCreatedMsg struct {
 	channel  string
 	playlist *youtube.Playlist
@@ -67,6 +72,8 @@ func (a AppModel) handlePlaylistsKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return a, cmd
 	case "o":
 		openSelectedPlaylistInBrowser(a.playlistsView.SelectedPlaylist())
+	case "c":
+		return a, copyPlaylistLinkCmd(a.playlistsView.SelectedPlaylist())
 	case "r":
 		cmd := a.loadPlaylistPanelCmd()
 		return a, cmd
@@ -88,6 +95,8 @@ func (a AppModel) handlePlaylistVideosKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return a, cmd
 	case "o":
 		openSelectedPlaylistInBrowser(a.playlistsView.SelectedPlaylist())
+	case "c":
+		return a, copyPlaylistLinkCmd(a.playlistsView.SelectedPlaylist())
 	case "r":
 		return a.openSelectedPlaylist()
 	}
@@ -226,5 +235,21 @@ func openSelectedPlaylistInBrowser(pl *youtube.Playlist) {
 	if pl == nil {
 		return
 	}
-	_ = exec.Command("xdg-open", "https://www.youtube.com/playlist?list="+pl.ID).Start()
+	_ = exec.Command("xdg-open", playlistURL(pl.ID)).Start()
+}
+
+// copyPlaylistLinkCmd copies the playlist's share link to the clipboard in the background.
+func copyPlaylistLinkCmd(pl *youtube.Playlist) tea.Cmd {
+	if pl == nil {
+		return nil
+	}
+	p := *pl
+	return func() tea.Msg {
+		return plCopiedMsg{playlist: p, err: copyToClipboard(playlistURL(p.ID))}
+	}
+}
+
+// playlistURL is the share link for a playlist; YouTube has no youtu.be form for playlists.
+func playlistURL(id string) string {
+	return "https://www.youtube.com/playlist?list=" + id
 }

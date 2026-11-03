@@ -215,3 +215,26 @@ func TestTabBarFitsEightyColumns(t *testing.T) {
 		}
 	}
 }
+
+func TestPlaylistsModelCopiedFeedback(t *testing.T) {
+	m := loadedPlaylistsModel()
+	url := playlistURL("PL1")
+	if url != "https://www.youtube.com/playlist?list=PL1" {
+		t.Fatalf("unexpected playlist URL %q", url)
+	}
+
+	m.SetCopied(youtube.Playlist{ID: "PL1", Title: "Seminar", PrivacyStatus: "public"}, url, nil)
+	if m.isError || !strings.Contains(m.feedback, url) {
+		t.Fatalf("expected success feedback with the link, got %q", m.feedback)
+	}
+
+	m.SetCopied(youtube.Playlist{ID: "PL3", Title: "Drafts", PrivacyStatus: "private"}, playlistURL("PL3"), nil)
+	if !m.isError || !strings.Contains(m.feedback, "PRIVATE") {
+		t.Fatalf("expected a private-playlist warning, got %q", m.feedback)
+	}
+
+	m.SetCopied(youtube.Playlist{ID: "PL1"}, url, errors.New("no clipboard"))
+	if !m.isError || !strings.Contains(m.feedback, url) {
+		t.Fatalf("a failed copy must show the link so it can be copied by hand, got %q", m.feedback)
+	}
+}

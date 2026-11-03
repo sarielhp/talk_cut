@@ -301,14 +301,22 @@ func (a AppModel) copyShortURL() tea.Cmd {
 		return nil
 	}
 	return func() tea.Msg {
-		cmd := exec.Command("wl-copy", url)
-		if err := cmd.Run(); err != nil {
-			cmd2 := exec.Command("xclip", "-selection", "clipboard")
-			cmd2.Stdin = strings.NewReader(url)
-			_ = cmd2.Run()
-		}
+		_ = copyToClipboard(url)
 		return ytCopiedMsg{}
 	}
+}
+
+// copyToClipboard puts text on the system clipboard via wl-copy (Wayland) or xclip (X11).
+func copyToClipboard(text string) error {
+	if err := exec.Command("wl-copy", text).Run(); err == nil {
+		return nil
+	}
+	cmd := exec.Command("xclip", "-selection", "clipboard")
+	cmd.Stdin = strings.NewReader(text)
+	if err := cmd.Run(); err != nil {
+		return fmt.Errorf("no clipboard tool worked (tried wl-copy and xclip): %w", err)
+	}
+	return nil
 }
 
 // launchCutPreview opens the rendered cut video in ffplay.
