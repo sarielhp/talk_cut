@@ -169,7 +169,7 @@ func initBadgesAndIcons(t *Theme) {
 		Foreground(t.Warning)
 }
 
-// RenderTabBar formats the persistent 5-tab navigation bar for any screen.
+// RenderTabBar formats the persistent 6-tab navigation bar for any screen.
 func RenderTabBar(activeTab, width int, theme Theme) string {
 	tabs := []string{
 		"[1] Cut Review",
@@ -177,14 +177,16 @@ func RenderTabBar(activeTab, width int, theme Theme) string {
 		"[3] Chapters",
 		"[4] Render",
 		"[5] YouTube",
+		"[6] Playlists",
 	}
-	if width < 88 {
+	if width < 104 {
 		tabs = []string{
 			"[1] Cuts",
 			"[2] Meta",
 			"[3] Chapters",
 			"[4] Render",
 			"[5] YouTube",
+			"[6] Lists",
 		}
 	}
 
@@ -198,6 +200,9 @@ func RenderTabBar(activeTab, width int, theme Theme) string {
 	}
 
 	appTitle := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("#FFFFFF")).Render(" talk_cut: ")
+	if width < 88 {
+		appTitle = "" // six short tabs alone are 75 columns; the title would wrap the bar at 80
+	}
 	tabBar := appTitle + strings.Join(parts, " ")
 	return lipgloss.NewStyle().Width(width).Background(lipgloss.Color("#1E293B")).Render(tabBar)
 }

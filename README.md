@@ -155,8 +155,8 @@ talk_cut youtube playlist add "Geometry Seminar Fall 2026" examples/26_09_08/
 
 | Key | Action |
 |---|---|
-| <kbd>←</kbd> / <kbd>→</kbd> | Switch between tabs (`[1] Cut Review` ↔ `[2] Metadata` ↔ `[3] Chapters` ↔ `[4] Render` ↔ `[5] YouTube`) |
-| <kbd>1</kbd> .. <kbd>5</kbd> | Jump directly to tab 1, 2, 3, 4, or 5 |
+| <kbd>←</kbd> / <kbd>→</kbd> | Switch between tabs (`[1] Cut Review` ↔ `[2] Metadata` ↔ `[3] Chapters` ↔ `[4] Render` ↔ `[5] YouTube` ↔ `[6] Playlists`) |
+| <kbd>1</kbd> .. <kbd>6</kbd> | Jump directly to tab 1 through 6 |
 | <kbd>q</kbd> / <kbd>Ctrl+C</kbd> | Quit `talk_cut` |
 
 ---
@@ -253,6 +253,20 @@ talk_cut youtube playlist add "Geometry Seminar Fall 2026" examples/26_09_08/
 | <kbd>Space</kbd> / <kbd>Enter</kbd> / <kbd>x</kbd> | Toggle talk playlist membership (immediately calls YouTube API if uploaded) |
 | <kbd>d</kbd> | Designate selected playlist as channel default in `~/.config/talk_cut/config.json` |
 | <kbd>Esc</kbd> / <kbd>p</kbd> | Close playlist picker overlay |
+
+### [6] Playlists Screen
+
+Browse the channel's playlists, create new ones, and edit which of the channel's 20 most recent uploads belong to each playlist. Playlists and uploads load when the tab is first opened; the channel is the one selected in the YouTube tab.
+
+| Key | Action |
+|---|---|
+| <kbd>↓</kbd> / <kbd>↑</kbd> (or <kbd>j</kbd>/<kbd>k</kbd>) | Move the cursor |
+| <kbd>Enter</kbd> | Open the selected playlist and show recent uploads with `[✔]` membership marks |
+| <kbd>Space</kbd> / <kbd>Enter</kbd> / <kbd>x</kbd> (in a playlist) | Add or remove the video under the cursor (immediate YouTube API call) |
+| <kbd>n</kbd> | Create a new playlist: type the title, <kbd>Tab</kbd> cycles privacy (public / unlisted / private), <kbd>Enter</kbd> creates, <kbd>Esc</kbd> cancels |
+| <kbd>o</kbd> | Open the selected playlist in the browser |
+| <kbd>r</kbd> | Reload playlists and uploads (or, inside a playlist, its contents) |
+| <kbd>Esc</kbd> | Back to the playlist list (from a playlist) or to Cut Review |
 
 ---
 

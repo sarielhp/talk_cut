@@ -38,7 +38,12 @@ const (
 	ScreenProg
 	// ScreenYouTube displays interactive YouTube upload, streaming progress, and verification.
 	ScreenYouTube
+	// ScreenPlaylists displays the playlist browser and membership editor.
+	ScreenPlaylists
 )
+
+// numScreens is the number of tabs reachable with Alt+arrows.
+const numScreens = int(ScreenPlaylists) + 1
 
 type progressMsg cutter.CutProgress
 
@@ -79,23 +84,24 @@ type ytCopiedMsg struct{}
 
 // AppModel is the root Bubble Tea application model.
 type AppModel struct {
-	screen       Screen
-	cutsView     CutsModel
-	metaView     MetaModel
-	chaptersView ChaptersModel
-	progView     ProgModel
-	youtubeView  YouTubeModel
-	bundle       bundle.RecordingBundle
-	media        cutter.MediaInfo
-	progChan     chan cutter.CutProgress
-	doneChan     chan cutDoneMsg
-	ytProgChan   chan ytProgressMsg
-	ytDoneChan   chan ytDoneMsg
-	width        int
-	height       int
-	isCutting    bool
-	isUploading  bool
-	cfg          config.Config
+	screen        Screen
+	cutsView      CutsModel
+	metaView      MetaModel
+	chaptersView  ChaptersModel
+	progView      ProgModel
+	youtubeView   YouTubeModel
+	playlistsView PlaylistsModel
+	bundle        bundle.RecordingBundle
+	media         cutter.MediaInfo
+	progChan      chan cutter.CutProgress
+	doneChan      chan cutDoneMsg
+	ytProgChan    chan ytProgressMsg
+	ytDoneChan    chan ytDoneMsg
+	width         int
+	height        int
+	isCutting     bool
+	isUploading   bool
+	cfg           config.Config
 }
 
 // NewAppModel creates an initialized AppModel.
@@ -123,23 +129,24 @@ func NewAppModel(
 	youtubeView := NewYouTubeModel(defaultOutput, vttPath, meta, cfg)
 
 	return AppModel{
-		screen:       ScreenCuts,
-		cutsView:     cutsView,
-		metaView:     metaView,
-		chaptersView: chaptersView,
-		progView:     progView,
-		youtubeView:  youtubeView,
-		bundle:       b,
-		media:        media,
-		progChan:     make(chan cutter.CutProgress, 32),
-		doneChan:     make(chan cutDoneMsg, 1),
-		ytProgChan:   make(chan ytProgressMsg, 32),
-		ytDoneChan:   make(chan ytDoneMsg, 1),
-		width:        100,
-		height:       30,
-		isCutting:    false,
-		isUploading:  false,
-		cfg:          cfg,
+		screen:        ScreenCuts,
+		cutsView:      cutsView,
+		metaView:      metaView,
+		chaptersView:  chaptersView,
+		progView:      progView,
+		youtubeView:   youtubeView,
+		playlistsView: NewPlaylistsModel(),
+		bundle:        b,
+		media:         media,
+		progChan:      make(chan cutter.CutProgress, 32),
+		doneChan:      make(chan cutDoneMsg, 1),
+		ytProgChan:    make(chan ytProgressMsg, 32),
+		ytDoneChan:    make(chan ytDoneMsg, 1),
+		width:         100,
+		height:        30,
+		isCutting:     false,
+		isUploading:   false,
+		cfg:           cfg,
 	}
 }
 
@@ -197,6 +204,17 @@ func (a AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return a.handleYTVideoAddedToPlaylistMsg(msg)
 	case ytVideoRemovedFromPlaylistMsg:
 		return a.handleYTVideoRemovedFromPlaylistMsg(msg)
+	case plPanelLoadedMsg:
+		a.playlistsView.SetLoaded(msg.channel, msg.playlists, msg.videos, msg.err)
+		return a, nil
+	case plMembersLoadedMsg:
+		a.playlistsView.SetMembers(msg.seq, msg.playlistID, msg.ids, msg.err)
+		return a, nil
+	case plCreatedMsg:
+		a.playlistsView.ApplyCreated(msg.channel, msg.playlist, msg.err)
+		return a, nil
+	case plToggledMsg:
+		return a.handlePlaylistToggled(msg)
 	case ytCopiedMsg:
 		a.youtubeView.SetCopiedFeedback(true)
 		return a, nil
@@ -224,6 +242,7 @@ func (a *AppModel) handleWindowSize(msg tea.WindowSizeMsg) {
 	a.chaptersView.SetDimensions(msg.Width, msg.Height)
 	a.progView.SetDimensions(msg.Width, msg.Height)
 	a.youtubeView.SetDimensions(msg.Width, msg.Height)
+	a.playlistsView.SetDimensions(msg.Width, msg.Height)
 }
 
 // isEditingText returns whether an active text input currently has focus.
@@ -232,6 +251,9 @@ func (a AppModel) isEditingText() bool {
 		return true
 	}
 	if a.screen == ScreenChapters && a.chaptersView.IsEditing() {
+		return true
+	}
+	if a.screen == ScreenPlaylists && a.playlistsView.IsEditing() {
 		return true
 	}
 	return false
@@ -300,6 +322,10 @@ func (a AppModel) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	}
 
 	if a.handleGlobalNav(msg) {
+		if a.screen == ScreenPlaylists && a.playlistsView.NeedsLoad(a.youtubeView.CurrentChannel()) {
+			cmd := a.loadPlaylistPanelCmd()
+			return a, cmd
+		}
 		return a, nil
 	}
 
@@ -314,6 +340,8 @@ func (a AppModel) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return a.handleProgKey(msg)
 	case ScreenYouTube:
 		return a.handleYouTubeKey(msg)
+	case ScreenPlaylists:
+		return a.handlePlaylistsKey(msg)
 	}
 
 	return a, nil
@@ -325,12 +353,12 @@ func (a *AppModel) handleGlobalNav(msg tea.KeyMsg) bool {
 		return false
 	}
 	if msg.String() == "alt+left" || (msg.Alt && msg.Type == tea.KeyLeft) {
-		prev := (int(a.screen) - 1 + 5) % 5
+		prev := (int(a.screen) - 1 + numScreens) % numScreens
 		a.switchTab(Screen(prev))
 		return true
 	}
 	if msg.String() == "alt+right" || (msg.Alt && msg.Type == tea.KeyRight) {
-		next := (int(a.screen) + 1) % 5
+		next := (int(a.screen) + 1) % numScreens
 		a.switchTab(Screen(next))
 		return true
 	}
@@ -351,6 +379,9 @@ func (a *AppModel) handleGlobalNav(msg tea.KeyMsg) bool {
 			return true
 		case "5":
 			a.switchTab(ScreenYouTube)
+			return true
+		case "6":
+			a.switchTab(ScreenPlaylists)
 			return true
 		}
 	}
@@ -373,7 +404,8 @@ func (a AppModel) handleCutsKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		a.switchTab(ScreenProg)
 		return a.startRender()
 	case "r", "ctrl+a":
-		return a, a.triggerAIChapters()
+		cmd := a.triggerAIChapters()
+		return a, cmd
 	}
 
 	var cmd tea.Cmd
@@ -392,11 +424,14 @@ func (a AppModel) handleMetaKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			a.switchTab(ScreenProg)
 			return a.startRender()
 		case "ctrl+a", "r":
-			return a, a.triggerAIChapters()
+			cmd := a.triggerAIChapters()
+			return a, cmd
 		case "e", "E":
-			return a, a.triggerEMLMetadata()
+			cmd := a.triggerEMLMetadata()
+			return a, cmd
 		case "u", "U":
-			return a, a.triggerURLMetadata()
+			cmd := a.triggerURLMetadata()
+			return a, cmd
 		case "enter":
 			if a.metaView.focusIndex == fieldCommit {
 				a.switchTab(ScreenProg)
@@ -420,7 +455,8 @@ func (a AppModel) handleChaptersKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			a.switchTab(ScreenCuts)
 			return a, nil
 		case "r", "ctrl+a":
-			return a, a.triggerAIChapters()
+			cmd := a.triggerAIChapters()
+			return a, cmd
 		case "ctrl+r", "c":
 			a.switchTab(ScreenProg)
 			return a.startRender()
@@ -553,6 +589,8 @@ func (a AppModel) forwardToActiveView(msg tea.Msg) (tea.Model, tea.Cmd) {
 		a.progView, cmd = a.progView.Update(msg)
 	case ScreenYouTube:
 		a.youtubeView, cmd = a.youtubeView.Update(msg)
+	case ScreenPlaylists:
+		a.playlistsView, cmd = a.playlistsView.Update(msg)
 	}
 	return a, cmd
 }
@@ -570,6 +608,8 @@ func (a AppModel) View() string {
 		return a.progView.View()
 	case ScreenYouTube:
 		return a.youtubeView.View()
+	case ScreenPlaylists:
+		return a.playlistsView.View()
 	}
 	return "talk_cut"
 }
