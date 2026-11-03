@@ -393,35 +393,9 @@ func FindChannelVideoForTalk(ctx context.Context, client *http.Client, title, di
 		return nil, fmt.Errorf("retrieving uploads playlist: %w", err)
 	}
 
-	reqURL := fmt.Sprintf("%s&playlistId=%s&maxResults=50", playlistItemsEndpoint, playlistID)
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, reqURL, nil)
+	data, err := fetchPlaylistItemsPage(ctx, client, playlistID, "", 50)
 	if err != nil {
-		return nil, fmt.Errorf("creating playlist request: %w", err)
-	}
-
-	resp, err := client.Do(req)
-	if err != nil {
-		return nil, fmt.Errorf("fetching playlist items: %w", err)
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		body, _ := io.ReadAll(resp.Body)
-		return nil, fmt.Errorf("playlist request failed (status %d): %s", resp.StatusCode, string(body))
-	}
-
-	var data struct {
-		Items []struct {
-			Snippet struct {
-				Title      string `json:"title"`
-				ResourceID struct {
-					VideoID string `json:"videoId"`
-				} `json:"resourceId"`
-			} `json:"snippet"`
-		} `json:"items"`
-	}
-	if err := json.NewDecoder(resp.Body).Decode(&data); err != nil {
-		return nil, fmt.Errorf("decoding playlist items: %w", err)
+		return nil, err
 	}
 
 	for _, item := range data.Items {

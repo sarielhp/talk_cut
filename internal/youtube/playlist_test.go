@@ -191,3 +191,148 @@ func TestRemoveVideoFromPlaylist(t *testing.T) {
 		t.Error("expected DELETE request to be issued for item_to_delete_1")
 	}
 }
+
+func TestRemoveVideoFromPlaylistReportsFailures(t *testing.T) {
+	origDelay := propagationRetryDelay
+	propagationRetryDelay = 0
+	defer func() { propagationRetryDelay = origDelay }()
+
+	cases := []struct {
+		name         string
+		listStatus   int
+		listBody     string
+		deleteStatus int
+		wantErr      bool
+	}{
+		{"not in playlist", http.StatusOK, `{"items": []}`, http.StatusNoContent, false},
+		{"lookup forbidden", http.StatusForbidden, `{"error": "quotaExceeded"}`, http.StatusNoContent, true},
+		{"lookup bad json", http.StatusOK, `{not json`, http.StatusNoContent, true},
+		{"delete forbidden", http.StatusOK, `{"items": [{"id": "it1"}]}`, http.StatusForbidden, true},
+		{"delete already gone", http.StatusOK, `{"items": [{"id": "it1"}]}`, http.StatusNotFound, false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if r.Method == http.MethodGet {
+					w.WriteHeader(tc.listStatus)
+					fmt.Fprint(w, tc.listBody)
+					return
+				}
+				w.WriteHeader(tc.deleteStatus)
+			}))
+			defer ts.Close()
+
+			origEndpoint := playlistItemsRemoveEndpoint
+			playlistItemsRemoveEndpoint = ts.URL
+			defer func() { playlistItemsRemoveEndpoint = origEndpoint }()
+
+			err := RemoveVideoFromPlaylist(context.Background(), ts.Client(), "PL123", "vid999")
+			if (err != nil) != tc.wantErr {
+				t.Fatalf("wantErr=%v, got %v", tc.wantErr, err)
+			}
+		})
+	}
+}
+
+func TestAddVideoToPlaylistRetriesWhileNewPlaylistPropagates(t *testing.T) {
+	orig := propagationRetryDelay
+	propagationRetryDelay = 0
+	defer func() { propagationRetryDelay = orig }()
+
+	cases := []struct {
+		name     string
+		statuses []int
+		body     string
+		wantErr  bool
+		wantHits int
+	}{
+		{"409 then ok", []int{http.StatusConflict, http.StatusOK}, `{"error":{"status":"ABORTED"}}`, false, 2},
+		{"404 playlistNotFound then ok", []int{http.StatusNotFound, http.StatusOK}, `{"reason":"playlistNotFound"}`, false, 2},
+		{"403 is not retried", []int{http.StatusForbidden}, `{"reason":"forbidden"}`, true, 1},
+		{"gives up", []int{409, 409, 409, 409, 409, 409}, `{}`, true, propagationRetries + 1},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			hits := 0
+			ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				w.WriteHeader(tc.statuses[min(hits, len(tc.statuses)-1)])
+				hits++
+				fmt.Fprint(w, tc.body)
+			}))
+			defer ts.Close()
+			origEndpoint := playlistItemsInsertEndpoint
+			playlistItemsInsertEndpoint = ts.URL
+			defer func() { playlistItemsInsertEndpoint = origEndpoint }()
+
+			err := AddVideoToPlaylist(context.Background(), ts.Client(), "PL1", "v1")
+			if (err != nil) != tc.wantErr || hits != tc.wantHits {
+				t.Fatalf("err=%v hits=%d; want err=%v hits=%d", err, hits, tc.wantErr, tc.wantHits)
+			}
+		})
+	}
+}
+
+func TestRemoveVideoFromPlaylistWaitsForJustAddedItem(t *testing.T) {
+	orig := propagationRetryDelay
+	propagationRetryDelay = 0
+	defer func() { propagationRetryDelay = orig }()
+
+	lookups, deleted := 0, false
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodDelete {
+			deleted = true
+			w.WriteHeader(http.StatusNoContent)
+			return
+		}
+		lookups++
+		if lookups < 3 {
+			fmt.Fprint(w, `{"items": []}`) // the add has not propagated yet
+			return
+		}
+		fmt.Fprint(w, `{"items": [{"id": "it1"}]}`)
+	}))
+	defer ts.Close()
+	origEndpoint := playlistItemsRemoveEndpoint
+	playlistItemsRemoveEndpoint = ts.URL
+	defer func() { playlistItemsRemoveEndpoint = origEndpoint }()
+
+	if err := RemoveVideoFromPlaylist(context.Background(), ts.Client(), "PL1", "v1"); err != nil {
+		t.Fatal(err)
+	}
+	if !deleted {
+		t.Fatal("remove gave up before the just-added item became visible")
+	}
+}
+
+func TestRemoveVideoFromPlaylistWaitsForNewPlaylist(t *testing.T) {
+	orig := propagationRetryDelay
+	propagationRetryDelay = 0
+	defer func() { propagationRetryDelay = orig }()
+
+	lookups, deleted := 0, false
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodDelete {
+			deleted = true
+			w.WriteHeader(http.StatusNoContent)
+			return
+		}
+		lookups++
+		if lookups == 1 {
+			w.WriteHeader(http.StatusNotFound)
+			fmt.Fprint(w, `{"error":{"errors":[{"reason":"playlistNotFound"}]}}`)
+			return
+		}
+		fmt.Fprint(w, `{"items": [{"id": "it1"}]}`)
+	}))
+	defer ts.Close()
+	origEndpoint := playlistItemsRemoveEndpoint
+	playlistItemsRemoveEndpoint = ts.URL
+	defer func() { playlistItemsRemoveEndpoint = origEndpoint }()
+
+	if err := RemoveVideoFromPlaylist(context.Background(), ts.Client(), "PL1", "v1"); err != nil {
+		t.Fatal(err)
+	}
+	if !deleted {
+		t.Fatal("expected the item to be deleted once the playlist became visible")
+	}
+}

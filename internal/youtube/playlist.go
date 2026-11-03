@@ -5,10 +5,13 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"strings"
+	"time"
 )
 
 var (
@@ -147,7 +150,16 @@ func CreatePlaylist(ctx context.Context, client *http.Client, title, description
 	}, nil
 }
 
-// AddVideoToPlaylist inserts a video into a YouTube playlist.
+// Right after a write, YouTube briefly rejects or hides it: a new playlist answers inserts with
+// 409 ABORTED or 404 playlistNotFound for ~2s, and lookups miss a just-added item for ~1s.
+var propagationRetryDelay = time.Second
+
+const propagationRetries = 4
+
+// errPlaylistNotFound marks a lookup that YouTube rejected as playlistNotFound, which a just-created playlist briefly is.
+var errPlaylistNotFound = errors.New("playlist not found")
+
+// AddVideoToPlaylist inserts a video into a YouTube playlist, retrying while a new playlist propagates.
 func AddVideoToPlaylist(ctx context.Context, client *http.Client, playlistID, videoID string) error {
 	playlistID = strings.TrimSpace(playlistID)
 	videoID = strings.TrimSpace(videoID)
@@ -158,6 +170,19 @@ func AddVideoToPlaylist(ctx context.Context, client *http.Client, playlistID, vi
 		return fmt.Errorf("video ID cannot be empty")
 	}
 
+	for attempt := 0; ; attempt++ {
+		retryable, err := insertPlaylistItem(ctx, client, playlistID, videoID)
+		if err == nil || !retryable || attempt == propagationRetries {
+			return err
+		}
+		if err := sleepContext(ctx, propagationRetryDelay); err != nil {
+			return err
+		}
+	}
+}
+
+// insertPlaylistItem makes one insert call and reports whether a failure is worth retrying.
+func insertPlaylistItem(ctx context.Context, client *http.Client, playlistID, videoID string) (bool, error) {
 	payload := map[string]any{
 		"snippet": map[string]any{
 			"playlistId": playlistID,
@@ -170,31 +195,44 @@ func AddVideoToPlaylist(ctx context.Context, client *http.Client, playlistID, vi
 
 	bodyBytes, err := json.Marshal(payload)
 	if err != nil {
-		return fmt.Errorf("marshaling playlist item payload: %w", err)
+		return false, fmt.Errorf("marshaling playlist item payload: %w", err)
 	}
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, playlistItemsInsertEndpoint, bytes.NewReader(bodyBytes))
 	if err != nil {
-		return fmt.Errorf("creating playlist item request: %w", err)
+		return false, fmt.Errorf("creating playlist item request: %w", err)
 	}
 	req.Header.Set("Content-Type", "application/json; charset=UTF-8")
 
 	resp, err := client.Do(req)
 	if err != nil {
-		return fmt.Errorf("adding video to playlist: %w", err)
+		return false, fmt.Errorf("adding video to playlist: %w", err)
 	}
 	defer resp.Body.Close()
 
-	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusCreated {
-		body, _ := io.ReadAll(resp.Body)
-		bodyStr := string(body)
-		if strings.Contains(bodyStr, "videoAlreadyInPlaylist") {
-			return nil // Already in playlist, treat as success
-		}
-		return fmt.Errorf("adding video to playlist failed (status %d): %s", resp.StatusCode, bodyStr)
+	if resp.StatusCode == http.StatusOK || resp.StatusCode == http.StatusCreated {
+		return false, nil
 	}
+	body, _ := io.ReadAll(resp.Body)
+	bodyStr := string(body)
+	if strings.Contains(bodyStr, "videoAlreadyInPlaylist") {
+		return false, nil // Already in playlist, treat as success
+	}
+	retryable := resp.StatusCode == http.StatusConflict ||
+		(resp.StatusCode == http.StatusNotFound && strings.Contains(bodyStr, "playlistNotFound"))
+	return retryable, fmt.Errorf("adding video to playlist failed (status %d): %s", resp.StatusCode, bodyStr)
+}
 
-	return nil
+// sleepContext waits for d or until ctx is done.
+func sleepContext(ctx context.Context, d time.Duration) error {
+	t := time.NewTimer(d)
+	defer t.Stop()
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-t.C:
+		return nil
+	}
 }
 
 // FindPlaylist searches channel playlists by ID, exact title, or title substring.
@@ -232,6 +270,8 @@ func FindPlaylist(ctx context.Context, client *http.Client, idOrTitle string) (*
 }
 
 // RemoveVideoFromPlaylist removes all occurrences of a video from a YouTube playlist.
+// A video that is not in the playlist is not an error; any failed lookup or deletion is.
+// An empty or playlistNotFound lookup is retried briefly, since YouTube lags just-made writes.
 func RemoveVideoFromPlaylist(ctx context.Context, client *http.Client, playlistID, videoID string) error {
 	playlistID = strings.TrimSpace(playlistID)
 	videoID = strings.TrimSpace(videoID)
@@ -242,20 +282,53 @@ func RemoveVideoFromPlaylist(ctx context.Context, client *http.Client, playlistI
 		return fmt.Errorf("video ID cannot be empty")
 	}
 
-	url := fmt.Sprintf("%s?part=id&playlistId=%s&videoId=%s&maxResults=50", playlistItemsRemoveEndpoint, playlistID, videoID)
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	var itemIDs []string
+	for attempt := 0; ; attempt++ {
+		ids, err := findPlaylistItemIDs(ctx, client, playlistID, videoID)
+		if err != nil && (!errors.Is(err, errPlaylistNotFound) || attempt == propagationRetries) {
+			return err
+		}
+		itemIDs = ids
+		if err == nil && (len(itemIDs) > 0 || attempt == propagationRetries) {
+			break
+		}
+		if err := sleepContext(ctx, propagationRetryDelay); err != nil {
+			return err
+		}
+	}
+	for _, itemID := range itemIDs {
+		if err := deletePlaylistItem(ctx, client, itemID); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// findPlaylistItemIDs returns the playlist item IDs under which a video appears in a playlist.
+func findPlaylistItemIDs(ctx context.Context, client *http.Client, playlistID, videoID string) ([]string, error) {
+	q := url.Values{}
+	q.Set("part", "id")
+	q.Set("playlistId", playlistID)
+	q.Set("videoId", videoID)
+	q.Set("maxResults", "50")
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, playlistItemsRemoveEndpoint+"?"+q.Encode(), nil)
 	if err != nil {
-		return fmt.Errorf("creating playlistItems list request: %w", err)
+		return nil, fmt.Errorf("creating playlistItems list request: %w", err)
 	}
 
 	resp, err := client.Do(req)
 	if err != nil {
-		return fmt.Errorf("querying playlist item: %w", err)
+		return nil, fmt.Errorf("querying playlist item: %w", err)
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		return nil
+		body, _ := io.ReadAll(resp.Body)
+		err := fmt.Errorf("looking up video in playlist failed (status %d): %s", resp.StatusCode, string(body))
+		if resp.StatusCode == http.StatusNotFound && strings.Contains(string(body), "playlistNotFound") {
+			err = fmt.Errorf("%w: %w", errPlaylistNotFound, err)
+		}
+		return nil, err
 	}
 
 	var data struct {
@@ -263,21 +336,33 @@ func RemoveVideoFromPlaylist(ctx context.Context, client *http.Client, playlistI
 			ID string `json:"id"`
 		} `json:"items"`
 	}
-	if err := json.NewDecoder(resp.Body).Decode(&data); err != nil || len(data.Items) == 0 {
+	if err := json.NewDecoder(resp.Body).Decode(&data); err != nil {
+		return nil, fmt.Errorf("decoding playlist items: %w", err)
+	}
+	ids := make([]string, 0, len(data.Items))
+	for _, item := range data.Items {
+		ids = append(ids, item.ID)
+	}
+	return ids, nil
+}
+
+// deletePlaylistItem deletes one playlist item; an item that is already gone counts as deleted.
+func deletePlaylistItem(ctx context.Context, client *http.Client, itemID string) error {
+	delURL := playlistItemsRemoveEndpoint + "?id=" + url.QueryEscape(itemID)
+	req, err := http.NewRequestWithContext(ctx, http.MethodDelete, delURL, nil)
+	if err != nil {
+		return fmt.Errorf("creating playlist item delete request: %w", err)
+	}
+	resp, err := client.Do(req)
+	if err != nil {
+		return fmt.Errorf("deleting playlist item: %w", err)
+	}
+	defer resp.Body.Close()
+
+	switch resp.StatusCode {
+	case http.StatusOK, http.StatusNoContent, http.StatusNotFound:
 		return nil
 	}
-
-	for _, item := range data.Items {
-		delURL := fmt.Sprintf("%s?id=%s", playlistItemsRemoveEndpoint, item.ID)
-		delReq, delErr := http.NewRequestWithContext(ctx, http.MethodDelete, delURL, nil)
-		if delErr != nil {
-			continue
-		}
-		delResp, doErr := client.Do(delReq)
-		if doErr == nil {
-			delResp.Body.Close()
-		}
-	}
-
-	return nil
+	body, _ := io.ReadAll(resp.Body)
+	return fmt.Errorf("removing video from playlist failed (status %d): %s", resp.StatusCode, string(body))
 }
