@@ -73,7 +73,7 @@ func NewYouTubeModel(videoPath, captionsPath string, meta model.TalkMetadata, cf
 		stage:        "idle",
 		width:        100,
 		height:       30,
-		statusMsg:    "Enter / u: upload to YouTube | c: cycle channel | 1..4: switch tabs",
+		statusMsg:    "Enter / u: upload to YouTube | c: cycle channel | 1..6: switch tabs",
 	}
 
 	m.refreshFileStats()

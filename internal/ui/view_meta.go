@@ -127,7 +127,7 @@ func NewMetaModel(meta model.TalkMetadata, cuts []model.CutInterval, defaultOutp
 		height:       30,
 		scrollOffset: 0,
 		isEditing:    false,
-		statusMsg:    "↑/↓: fields | Enter: edit | e: fill from .eml | u: fill from URL | Space: privacy | 1-5: tabs",
+		statusMsg:    "↑/↓: fields | Enter: edit | e: fill from .eml | u: fill from URL | Space: privacy | 1-6: tabs",
 	}
 }
 
@@ -730,7 +730,7 @@ func (m MetaModel) renderFooter(totalLines, visibleHeight int) string {
 	if m.isEditing {
 		msg = "Editing field... Enter/Esc: done | ←/→: move cursor"
 	} else if msg == "" {
-		msg = "↑/↓: fields | Enter: edit | e: fill from .eml | u: fill from URL | Space: privacy | 1-5: tabs"
+		msg = "↑/↓: fields | Enter: edit | e: fill from .eml | u: fill from URL | Space: privacy | 1-6: tabs"
 	}
 	bar := m.theme.HelpDesc.Render(" " + msg + scrollInfo)
 	return lipgloss.NewStyle().Width(m.width).Render(bar)

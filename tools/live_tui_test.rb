@@ -240,7 +240,7 @@ class TUISnapshotTester
 
     # Commit edit
     send_key('Enter')
-    wait_for_pattern('1-5: tabs', 'Committed edit on URL field')
+    wait_for_pattern('1-6: tabs', 'Committed edit on URL field')
 
     # Return to Cuts view with [Esc]
     log_step('Return to Cuts view with [Esc]')

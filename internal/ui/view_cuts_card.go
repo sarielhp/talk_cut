@@ -329,7 +329,7 @@ func (m CutsModel) renderFloatingHelpDialog(width int) string {
 	rows := []string{
 		title,
 		"",
-		"  ← / →       Switch tabs (1..4)         Tab         Metadata screen",
+		"  ← / →       Switch tabs (1..6)         Tab         Metadata screen",
 		"  j / k       Navigate cues              Space / x   Toggle Cut / Keep",
 		"  [ / ]       Jump prev / next chapter   m           Mark chapter start",
 		"  g / G       Jump top / bottom          s / Ctrl+S  Save cuts to disk",
