@@ -622,11 +622,12 @@ func (m CutsModel) renderCueRow(idx, width int) string {
 
 	baseStyle := m.cueStyle(false, cue.Action)
 	var badgeStr string
-	if cue.Action == model.ActionCut {
+	switch cue.Action {
+	case model.ActionCut:
 		badgeStr = m.theme.IconCut.Render(actionIcon)
-	} else if cue.Action == model.ActionReview {
+	case model.ActionReview:
 		badgeStr = m.theme.IconReview.Render(actionIcon)
-	} else {
+	default:
 		badgeStr = m.theme.IconKept.Render(actionIcon)
 	}
 	raw := fmt.Sprintf("%s[%s] %s  %s", cursorTag, ts, badgeStr, text)
@@ -693,15 +694,16 @@ func (m CutsModel) renderFeedbackBanner(availWidth int) string {
 	var textStyle lipgloss.Style
 	var badgeText string
 
-	if m.saveIsError {
+	switch {
+	case m.saveIsError:
 		badge = m.theme.BadgeCut
 		textStyle = m.theme.DangerText.Bold(true)
 		badgeText = " ✗ ERROR "
-	} else if strings.Contains(m.saveFeedback, "Playing") {
+	case strings.Contains(m.saveFeedback, "Playing"):
 		badge = m.theme.TitleStyle
 		textStyle = m.theme.PrimaryText.Bold(true)
 		badgeText = " ▶ PREVIEW "
-	} else {
+	default:
 		badge = m.theme.BadgeKept
 		textStyle = m.theme.SuccessText.Bold(true)
 		badgeText = " ✔ SAVED "
@@ -724,13 +726,14 @@ func (m CutsModel) renderFeedbackBanner(availWidth int) string {
 func (m CutsModel) renderDefaultHints(availWidth int) string {
 	msg := m.statusMsg
 	if msg == "" {
-		if availWidth >= 75 {
+		switch {
+		case availWidth >= 75:
 			msg = "j/k: nav | Space: cut/keep | Tab: chapter | c: commit cut | p: preview | F1: help"
-		} else if availWidth >= 55 {
+		case availWidth >= 55:
 			msg = "j/k: nav | Space: cut/keep | Tab: chapter | c: commit cut | F1: help"
-		} else if availWidth >= 30 {
+		case availWidth >= 30:
 			msg = "j/k: nav | Space: cut | c: cut video"
-		} else {
+		default:
 			msg = ""
 		}
 	}

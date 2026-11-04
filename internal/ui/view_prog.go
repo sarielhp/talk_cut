@@ -152,11 +152,8 @@ func (m ProgModel) Update(msg tea.Msg) (ProgModel, tea.Cmd) {
 		}
 		return m, cmd
 	case tea.KeyMsg:
-		if m.done {
-			switch msg.String() {
-			case "p":
-				return m, m.launchPreview()
-			}
+		if m.done && msg.String() == "p" {
+			return m, m.launchPreview()
 		}
 	}
 	return m, nil

@@ -42,9 +42,7 @@ func TestUploadVideo(t *testing.T) {
 	defer ts.Close()
 
 	uploadURL = ts.URL + "/resumable_upload"
-	origEndpoint := videosEndpoint
-	videosEndpoint = ts.URL + "/initiate"
-	defer func() { videosEndpoint = origEndpoint }()
+	override(t, &videosEndpoint, ts.URL+"/initiate")
 
 	opts := UploadOptions{
 		VideoPath: dummyVideo,
@@ -74,19 +72,9 @@ func TestUploadCaption(t *testing.T) {
 		t.Fatalf("writing dummy vtt: %v", err)
 	}
 
-	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.Method != http.MethodPost {
-			http.Error(w, "expected post", http.StatusMethodNotAllowed)
-			return
-		}
-		w.WriteHeader(http.StatusOK)
-		fmt.Fprintln(w, `{"id": "caption_id_123"}`)
-	}))
-	defer ts.Close()
+	ts := jsonServer(t, http.MethodPost, `{"id": "caption_id_123"}`)
 
-	origCap := captionsEndpoint
-	captionsEndpoint = ts.URL + "/captions"
-	defer func() { captionsEndpoint = origCap }()
+	override(t, &captionsEndpoint, ts.URL+"/captions")
 
 	err := UploadCaption(context.Background(), ts.Client(), "mock_vid", dummyVTT, "en", "English")
 	if err != nil {
@@ -117,9 +105,7 @@ func TestVerifyVideo(t *testing.T) {
 	}))
 	defer ts.Close()
 
-	origEndpoint := videoStatusEndpoint
-	videoStatusEndpoint = ts.URL + "/videos?part=snippet,status,processingDetails,contentDetails"
-	defer func() { videoStatusEndpoint = origEndpoint }()
+	override(t, &videoStatusEndpoint, ts.URL+"/videos?part=snippet,status,processingDetails,contentDetails")
 
 	ver, err := VerifyVideo(context.Background(), ts.Client(), "vid_abc123")
 	if err != nil {

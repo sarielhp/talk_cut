@@ -12,30 +12,30 @@ import (
 	"time"
 )
 
-func TestInferenceEndpoint(t *testing.T) {
-	cases := map[string]string{
-		"http://tqed:8095":           "http://tqed:8095/inference",
-		"http://tqed:8095/":          "http://tqed:8095/inference",
-		"http://tqed:8095/inference": "http://tqed:8095/inference",
-		"  http://tqed:8095/  ":      "http://tqed:8095/inference",
+func TestEndpoints(t *testing.T) {
+	tests := []struct {
+		name  string
+		build func(string) string
+		cases map[string]string
+	}{
+		{"inferenceEndpoint", inferenceEndpoint, map[string]string{
+			"http://tqed:8095":           "http://tqed:8095/inference",
+			"http://tqed:8095/":          "http://tqed:8095/inference",
+			"http://tqed:8095/inference": "http://tqed:8095/inference",
+			"  http://tqed:8095/  ":      "http://tqed:8095/inference",
+		}},
+		{"healthEndpoint", healthEndpoint, map[string]string{
+			"http://tqed:8095":           "http://tqed:8095/health",
+			"http://tqed:8095/":          "http://tqed:8095/health",
+			"http://tqed:8095/inference": "http://tqed:8095/health",
+			"":                           "",
+		}},
 	}
-	for in, want := range cases {
-		if got := inferenceEndpoint(in); got != want {
-			t.Errorf("inferenceEndpoint(%q) = %q, want %q", in, got, want)
-		}
-	}
-}
-
-func TestHealthEndpoint(t *testing.T) {
-	cases := map[string]string{
-		"http://tqed:8095":           "http://tqed:8095/health",
-		"http://tqed:8095/":          "http://tqed:8095/health",
-		"http://tqed:8095/inference": "http://tqed:8095/health",
-		"":                           "",
-	}
-	for in, want := range cases {
-		if got := healthEndpoint(in); got != want {
-			t.Errorf("healthEndpoint(%q) = %q, want %q", in, got, want)
+	for _, tt := range tests {
+		for in, want := range tt.cases {
+			if got := tt.build(in); got != want {
+				t.Errorf("%s(%q) = %q, want %q", tt.name, in, got, want)
+			}
 		}
 	}
 }

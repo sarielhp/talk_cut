@@ -260,9 +260,8 @@ func (m MetaModel) visibleBodyHeight() int {
 
 // Update processes terminal messages and user interactions.
 func (m MetaModel) Update(msg tea.Msg) (MetaModel, tea.Cmd) {
-	switch msg := msg.(type) {
-	case tea.KeyMsg:
-		return m.handleKey(msg)
+	if key, ok := msg.(tea.KeyMsg); ok {
+		return m.handleKey(key)
 	}
 
 	return m.updateInputs(msg)

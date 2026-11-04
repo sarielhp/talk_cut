@@ -10,13 +10,7 @@ import (
 )
 
 func TestListPlaylists(t *testing.T) {
-	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.Method != http.MethodGet {
-			http.Error(w, "expected GET", http.StatusMethodNotAllowed)
-			return
-		}
-		w.WriteHeader(http.StatusOK)
-		fmt.Fprintln(w, `{
+	ts := jsonServer(t, http.MethodGet, `{
 			"items": [
 				{
 					"id": "PL123",
@@ -32,12 +26,8 @@ func TestListPlaylists(t *testing.T) {
 				}
 			]
 		}`)
-	}))
-	defer ts.Close()
 
-	origEndpoint := playlistsListEndpoint
-	playlistsListEndpoint = ts.URL
-	defer func() { playlistsListEndpoint = origEndpoint }()
+	override(t, &playlistsListEndpoint, ts.URL)
 
 	playlists, err := ListPlaylists(context.Background(), ts.Client())
 	if err != nil {
@@ -56,23 +46,13 @@ func TestListPlaylists(t *testing.T) {
 }
 
 func TestCreatePlaylist(t *testing.T) {
-	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.Method != http.MethodPost {
-			http.Error(w, "expected POST", http.StatusMethodNotAllowed)
-			return
-		}
-		w.WriteHeader(http.StatusOK)
-		fmt.Fprintln(w, `{
+	ts := jsonServer(t, http.MethodPost, `{
 			"id": "PL_new_789",
 			"snippet": {"title": "Theory Seminar 2026", "description": "New talks"},
 			"status": {"privacyStatus": "public"}
 		}`)
-	}))
-	defer ts.Close()
 
-	origEndpoint := playlistsCreateEndpoint
-	playlistsCreateEndpoint = ts.URL
-	defer func() { playlistsCreateEndpoint = origEndpoint }()
+	override(t, &playlistsCreateEndpoint, ts.URL)
 
 	pl, err := CreatePlaylist(context.Background(), ts.Client(), "Theory Seminar 2026", "New talks", "public")
 	if err != nil {
@@ -103,9 +83,7 @@ func TestAddVideoToPlaylist(t *testing.T) {
 	}))
 	defer ts.Close()
 
-	origEndpoint := playlistItemsInsertEndpoint
-	playlistItemsInsertEndpoint = ts.URL
-	defer func() { playlistItemsInsertEndpoint = origEndpoint }()
+	override(t, &playlistItemsInsertEndpoint, ts.URL)
 
 	// Standard add
 	if err := AddVideoToPlaylist(context.Background(), ts.Client(), "PL123", "vid999"); err != nil {
@@ -135,9 +113,7 @@ func TestFindPlaylist(t *testing.T) {
 	}))
 	defer ts.Close()
 
-	origEndpoint := playlistsListEndpoint
-	playlistsListEndpoint = ts.URL
-	defer func() { playlistsListEndpoint = origEndpoint }()
+	override(t, &playlistsListEndpoint, ts.URL)
 
 	// 1. By exact ID
 	pl, err := FindPlaylist(context.Background(), ts.Client(), "PL_abc")
@@ -179,9 +155,7 @@ func TestRemoveVideoFromPlaylist(t *testing.T) {
 	}))
 	defer ts.Close()
 
-	origEndpoint := playlistItemsRemoveEndpoint
-	playlistItemsRemoveEndpoint = ts.URL
-	defer func() { playlistItemsRemoveEndpoint = origEndpoint }()
+	override(t, &playlistItemsRemoveEndpoint, ts.URL)
 
 	err := RemoveVideoFromPlaylist(context.Background(), ts.Client(), "PL123", "vid999")
 	if err != nil {
@@ -193,9 +167,7 @@ func TestRemoveVideoFromPlaylist(t *testing.T) {
 }
 
 func TestRemoveVideoFromPlaylistReportsFailures(t *testing.T) {
-	origDelay := propagationRetryDelay
-	propagationRetryDelay = 0
-	defer func() { propagationRetryDelay = origDelay }()
+	override(t, &propagationRetryDelay, 0)
 
 	cases := []struct {
 		name         string
@@ -222,9 +194,7 @@ func TestRemoveVideoFromPlaylistReportsFailures(t *testing.T) {
 			}))
 			defer ts.Close()
 
-			origEndpoint := playlistItemsRemoveEndpoint
-			playlistItemsRemoveEndpoint = ts.URL
-			defer func() { playlistItemsRemoveEndpoint = origEndpoint }()
+			override(t, &playlistItemsRemoveEndpoint, ts.URL)
 
 			err := RemoveVideoFromPlaylist(context.Background(), ts.Client(), "PL123", "vid999")
 			if (err != nil) != tc.wantErr {
@@ -235,9 +205,7 @@ func TestRemoveVideoFromPlaylistReportsFailures(t *testing.T) {
 }
 
 func TestAddVideoToPlaylistRetriesWhileNewPlaylistPropagates(t *testing.T) {
-	orig := propagationRetryDelay
-	propagationRetryDelay = 0
-	defer func() { propagationRetryDelay = orig }()
+	override(t, &propagationRetryDelay, 0)
 
 	cases := []struct {
 		name     string
@@ -260,9 +228,7 @@ func TestAddVideoToPlaylistRetriesWhileNewPlaylistPropagates(t *testing.T) {
 				fmt.Fprint(w, tc.body)
 			}))
 			defer ts.Close()
-			origEndpoint := playlistItemsInsertEndpoint
-			playlistItemsInsertEndpoint = ts.URL
-			defer func() { playlistItemsInsertEndpoint = origEndpoint }()
+			override(t, &playlistItemsInsertEndpoint, ts.URL)
 
 			err := AddVideoToPlaylist(context.Background(), ts.Client(), "PL1", "v1")
 			if (err != nil) != tc.wantErr || hits != tc.wantHits {
@@ -273,9 +239,7 @@ func TestAddVideoToPlaylistRetriesWhileNewPlaylistPropagates(t *testing.T) {
 }
 
 func TestRemoveVideoFromPlaylistWaitsForJustAddedItem(t *testing.T) {
-	orig := propagationRetryDelay
-	propagationRetryDelay = 0
-	defer func() { propagationRetryDelay = orig }()
+	override(t, &propagationRetryDelay, 0)
 
 	lookups, deleted := 0, false
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -292,9 +256,7 @@ func TestRemoveVideoFromPlaylistWaitsForJustAddedItem(t *testing.T) {
 		fmt.Fprint(w, `{"items": [{"id": "it1"}]}`)
 	}))
 	defer ts.Close()
-	origEndpoint := playlistItemsRemoveEndpoint
-	playlistItemsRemoveEndpoint = ts.URL
-	defer func() { playlistItemsRemoveEndpoint = origEndpoint }()
+	override(t, &playlistItemsRemoveEndpoint, ts.URL)
 
 	if err := RemoveVideoFromPlaylist(context.Background(), ts.Client(), "PL1", "v1"); err != nil {
 		t.Fatal(err)
@@ -305,9 +267,7 @@ func TestRemoveVideoFromPlaylistWaitsForJustAddedItem(t *testing.T) {
 }
 
 func TestRemoveVideoFromPlaylistWaitsForNewPlaylist(t *testing.T) {
-	orig := propagationRetryDelay
-	propagationRetryDelay = 0
-	defer func() { propagationRetryDelay = orig }()
+	override(t, &propagationRetryDelay, 0)
 
 	lookups, deleted := 0, false
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -325,9 +285,7 @@ func TestRemoveVideoFromPlaylistWaitsForNewPlaylist(t *testing.T) {
 		fmt.Fprint(w, `{"items": [{"id": "it1"}]}`)
 	}))
 	defer ts.Close()
-	origEndpoint := playlistItemsRemoveEndpoint
-	playlistItemsRemoveEndpoint = ts.URL
-	defer func() { playlistItemsRemoveEndpoint = origEndpoint }()
+	override(t, &playlistItemsRemoveEndpoint, ts.URL)
 
 	if err := RemoveVideoFromPlaylist(context.Background(), ts.Client(), "PL1", "v1"); err != nil {
 		t.Fatal(err)

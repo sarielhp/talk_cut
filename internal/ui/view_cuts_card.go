@@ -156,11 +156,12 @@ func (m CutsModel) bottomCardHeader(cue model.SubtitleCue) string {
 
 	hasFeedback := !m.savedAt.IsZero() && time.Since(m.savedAt) < 4*time.Second && m.saveFeedback != ""
 	if hasFeedback {
-		if m.saveIsError {
+		switch {
+		case m.saveIsError:
 			statusBadge += " " + m.theme.BadgeCut.Render(" ✗ ERROR ")
-		} else if strings.Contains(m.saveFeedback, "Playing") {
+		case strings.Contains(m.saveFeedback, "Playing"):
 			statusBadge += " " + m.theme.TitleStyle.Render(" ▶ PLAYING ")
-		} else {
+		default:
 			statusBadge += " " + m.theme.BadgeKept.Render(" ✔ SAVED ")
 		}
 	}

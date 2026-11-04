@@ -457,20 +457,12 @@ func (a AppModel) fetchPlaylistsCmd() tea.Cmd {
 // playlistMembershipChange adds a video to, or removes it from, a playlist.
 type playlistMembershipChange func(ctx context.Context, client *http.Client, playlistID, videoID string) error
 
-// playlistMembershipCmd authenticates on the current channel, applies change, and
-// reports its outcome through done.
+// playlistMembershipCmd applies change to the video's membership in a playlist on the
+// current channel and reports the outcome, including an authentication failure, through done.
 func (a AppModel) playlistMembershipCmd(playlistID, videoID string, change playlistMembershipChange, done func(error) tea.Msg) tea.Cmd {
-	channel := a.youtubeView.CurrentChannel()
-	cfg := a.cfg
-	return func() tea.Msg {
-		client, err := youtube.GetAuthenticatedClient(context.Background(), cfg, channel)
-		if err != nil {
-			return done(err)
-		}
-		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
-		defer cancel()
+	return a.withYouTubeClient(func(ctx context.Context, client *http.Client) tea.Msg {
 		return done(change(ctx, client, playlistID, videoID))
-	}
+	}, done)
 }
 
 type ytPlaylistsLoadedMsg struct {

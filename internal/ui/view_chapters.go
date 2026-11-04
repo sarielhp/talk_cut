@@ -95,9 +95,8 @@ func (m *ChaptersModel) SetCues(cues []model.SubtitleCue) {
 
 // Update handles messages and key inputs for the chapter manager.
 func (m ChaptersModel) Update(msg tea.Msg) (ChaptersModel, tea.Cmd) {
-	switch msg := msg.(type) {
-	case tea.KeyMsg:
-		return m.handleKey(msg)
+	if key, ok := msg.(tea.KeyMsg); ok {
+		return m.handleKey(key)
 	}
 
 	if m.isEditing {

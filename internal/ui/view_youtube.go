@@ -344,15 +344,15 @@ func (m *YouTubeModel) SetPlaylistRemoved(id, title string) {
 
 // Update handles progress bar frame ticks and key events.
 func (m YouTubeModel) Update(msg tea.Msg) (YouTubeModel, tea.Cmd) {
-	switch msg := msg.(type) {
-	case progress.FrameMsg:
-		newModel, cmd := m.progBar.Update(msg)
-		if pm, ok := newModel.(progress.Model); ok {
-			m.progBar = pm
-		}
-		return m, cmd
+	frame, ok := msg.(progress.FrameMsg)
+	if !ok {
+		return m, nil
 	}
-	return m, nil
+	newModel, cmd := m.progBar.Update(frame)
+	if pm, ok := newModel.(progress.Model); ok {
+		m.progBar = pm
+	}
+	return m, cmd
 }
 
 // View renders the full YouTube tab screen.
@@ -433,15 +433,16 @@ func (m YouTubeModel) renderPreflightBox() string {
 	}
 
 	pls := m.talkMeta.AllPlaylists()
-	if len(pls) == 1 {
+	switch {
+	case len(pls) == 1:
 		lines = append(lines, fmt.Sprintf("Playlist:      %s", m.theme.SuccessText.Render("✔ "+pls[0].Title)))
-	} else if len(pls) > 1 {
+	case len(pls) > 1:
 		var titles []string
 		for _, pl := range pls {
 			titles = append(titles, pl.Title)
 		}
 		lines = append(lines, fmt.Sprintf("Playlists:     %s", m.theme.SuccessText.Render("✔ "+strings.Join(titles, ", "))))
-	} else if m.cfg.DefaultPlaylist != "" {
+	case m.cfg.DefaultPlaylist != "":
 		lines = append(lines, fmt.Sprintf("Playlist:      %s", lipgloss.NewStyle().Foreground(lipgloss.Color("#9CA3AF")).Render("Default: "+m.cfg.DefaultPlaylist)))
 	}
 
@@ -465,7 +466,8 @@ func (m YouTubeModel) renderPreflightBox() string {
 		)
 	}
 
-	if alreadyUploaded && m.hasToken {
+	switch {
+	case alreadyUploaded && m.hasToken:
 		lines = append(lines,
 			"",
 			lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("#FFFFFF")).Background(lipgloss.Color("#0284C7")).Padding(0, 2).Render(" Press [d] or [Enter] to Update Details on YouTube "),
@@ -473,12 +475,12 @@ func (m YouTubeModel) renderPreflightBox() string {
 			"",
 			lipgloss.NewStyle().Foreground(lipgloss.Color("#9CA3AF")).Render("  [p] Choose Playlists  |  [u] Force Re-upload  |  [o] Open Browser  |  [c] Copy Link"),
 		)
-	} else if m.videoExists && m.hasToken {
+	case m.videoExists && m.hasToken:
 		lines = append(lines,
 			"",
 			lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("#FFFFFF")).Background(lipgloss.Color("#10B981")).Padding(0, 2).Render(" Press [u] or [Enter] to Start YouTube Upload "),
 		)
-	} else if !m.videoExists {
+	case !m.videoExists:
 		lines = append(lines,
 			"",
 			lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("#FFFFFF")).Background(lipgloss.Color("#F59E0B")).Padding(0, 2).Render(" Press [4] or [r] to Render Video First "),
@@ -596,17 +598,18 @@ func (m YouTubeModel) renderPlaylistSelector() string {
 	var lines []string
 	lines = append(lines, title, "")
 
-	if m.loadingPlaylists {
+	switch {
+	case m.loadingPlaylists:
 		lines = append(lines,
 			lipgloss.NewStyle().Foreground(lipgloss.Color("#06B6D4")).Render("  Fetching playlists from YouTube..."),
 		)
-	} else if len(m.playlists) == 0 {
+	case len(m.playlists) == 0:
 		lines = append(lines,
 			"  No playlists found on this channel.",
 			"",
 			"  Press [Esc] to return.",
 		)
-	} else {
+	default:
 		for i, pl := range m.playlists {
 			isCursor := i == m.playlistIdx
 			isDefault := m.cfg.DefaultPlaylist != "" && (m.cfg.DefaultPlaylist == pl.ID || strings.EqualFold(m.cfg.DefaultPlaylist, pl.Title))
