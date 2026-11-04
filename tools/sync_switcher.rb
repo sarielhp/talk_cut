@@ -22,14 +22,7 @@ unless profile
 end
 
 profile_dir = File.join(switcher_dir, profile)
-key_file = File.join(profile_dir, 'API_key.sh')
 conf_file = File.join(profile_dir, 'config.json')
-
-api_key = nil
-if File.exist?(key_file)
-  content = File.read(key_file)
-  api_key = Regexp.last_match(1) if content =~ /OPENROUTER_API_KEY=["']?([^"'\s]+)["']?/
-end
 
 model = 'google/gemini-2.5-flash-lite'
 if File.exist?(conf_file)

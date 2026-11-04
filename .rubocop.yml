@@ -1,0 +1,99 @@
+# Balanced RuboCop configuration aligned with ~/prog/standards/ruby/GUIDELINES.md
+# Cognitive metrics (complexity, method length, depth) are enforced via `ruby-audit`.
+
+AllCops:
+  # Explicit because ruby-static-analysis passes --config, which skips .ruby-version.
+  TargetRubyVersion: 3.3
+  NewCops: enable
+  SuggestExtensions: false
+  Exclude:
+    - 'vendor/**/*'
+    - 'junk/**/*'
+    - '.bundle/**/*'
+    - 'tmp/**/*'
+    - 'reviews/**/*'     # review-cycle artifacts
+
+# Metric thresholds: Defer to `ruby-audit` for cognitive complexity & tiered sizing
+Metrics/MethodLength:
+  Enabled: false
+
+Metrics/BlockLength:
+  Exclude:
+    - 'test/**/*'
+    - 'spec/**/*'
+    - 'Rakefile'
+    - '*.gemspec'
+
+Metrics/CyclomaticComplexity:
+  Enabled: false
+
+Metrics/PerceivedComplexity:
+  Enabled: false
+
+Metrics/AbcSize:
+  Enabled: false
+
+Metrics/ClassLength:
+  Max: 800
+
+Metrics/ModuleLength:
+  Max: 800
+
+Metrics/ParameterLists:
+  Max: 8
+
+# String allocation hygiene
+Style/FrozenStringLiteralComment:
+  Enabled: true
+  EnforcedStyle: always
+
+Style/StringConcatenation:
+  Enabled: false # Permit string concatenation where appropriate
+
+# Control flow & happy path line-of-sight
+Metrics/BlockNesting:
+  Max: 4 # Aligned with GUIDELINES.md Nesting Depth <= 4
+
+Style/Documentation:
+  Enabled: false # Permit lean classes, structs, and CLI scripts without docstring ceremony
+
+Style/GlobalVars:
+  AllowedVariables:
+    - $PROGRAM_NAME
+    - $0
+    - $stdin
+    - $stdout
+    - $stderr
+    - $?
+
+Layout/LineLength:
+  Max: 140
+  AllowedPatterns:
+    - '^\s*#'
+    - '^\s*opts\.on'
+
+Style/GuardClause:
+  Enabled: true
+
+Style/IfUnlessModifier:
+  Enabled: true
+
+Style/EmptyElse:
+  EnforcedStyle: empty
+
+Style/StderrPuts:
+  Enabled: false # Allow both warn and $stderr.puts in scripts
+
+# Safety & Exception Handling
+Lint/RescueException:
+  Enabled: true
+
+Lint/SuppressedException:
+  Enabled: true
+
+Lint/ScriptPermission:
+  Enabled: false # Permit drafting scripts prior to chmod +x or deployment to bin/
+
+# Process Execution Safety
+Security/Open:
+  Enabled: true
