@@ -50,7 +50,7 @@ func runYouTubeUpdate(ctx context.Context, opts *cliOptions, cfg config.Config) 
 		return fmt.Errorf("determining local video duration: %w", err)
 	}
 
-	if err := verifyVideoLengthAgreement(localDur, localSource, ytVer.Duration, videoID); err != nil {
+	if err = verifyVideoLengthAgreement(localDur, localSource, ytVer.Duration, videoID); err != nil {
 		return err
 	}
 

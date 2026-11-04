@@ -84,8 +84,8 @@ func (m PlaylistsModel) IsEditing() bool {
 	return m.mode == plModeCreate
 }
 
-// Mode returns the current sub-view.
-func (m PlaylistsModel) Mode() plPanelMode {
+// panelMode returns the current sub-view.
+func (m PlaylistsModel) panelMode() plPanelMode {
 	return m.mode
 }
 

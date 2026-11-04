@@ -98,8 +98,8 @@ func TestPlaylistsModelCreate(t *testing.T) {
 		t.Fatal("must not resubmit while creating")
 	}
 	m.ApplyCreated("seminar", &youtube.Playlist{ID: "PL9", Title: title, PrivacyStatus: privacy}, nil)
-	if m.Mode() != plModeVideos || m.SelectedPlaylist().ID != "PL9" || !m.MembershipKnown() {
-		t.Fatalf("expected new playlist to open with empty membership, mode=%d", m.Mode())
+	if m.panelMode() != plModeVideos || m.SelectedPlaylist().ID != "PL9" || !m.MembershipKnown() {
+		t.Fatalf("expected new playlist to open with empty membership, mode=%d", m.panelMode())
 	}
 	if len(m.playlists) != 3 {
 		t.Fatalf("expected 3 playlists, got %d", len(m.playlists))
@@ -120,7 +120,7 @@ func TestAppPlaylistsTabIsolatesTextEntry(t *testing.T) {
 	}
 	res, _ = app.Update(tea.KeyMsg{Type: tea.KeyEsc})
 	app = res.(AppModel)
-	if app.playlistsView.Mode() != plModeList {
+	if app.playlistsView.panelMode() != plModeList {
 		t.Fatal("esc must cancel the create form")
 	}
 }
@@ -148,7 +148,7 @@ func TestPlaylistsModelChannelSwitchReloads(t *testing.T) {
 		t.Fatal("switching channel must require a reload")
 	}
 	m.SetLoading("course")
-	if m.Mode() != plModeList || len(m.playlists) != 0 || m.MembershipKnown() {
+	if m.panelMode() != plModeList || len(m.playlists) != 0 || m.MembershipKnown() {
 		t.Fatal("old channel data must be discarded when loading another channel")
 	}
 
@@ -193,8 +193,8 @@ func TestPlaylistsModelCreateAfterUserMovedOn(t *testing.T) {
 	m.MoveCursor(1) // now on PL2
 
 	m.ApplyCreated("seminar", &youtube.Playlist{ID: "PL9", Title: "New"}, nil)
-	if m.Mode() != plModeList {
-		t.Fatalf("create response must not navigate after cancel, mode=%d", m.Mode())
+	if m.panelMode() != plModeList {
+		t.Fatalf("create response must not navigate after cancel, mode=%d", m.panelMode())
 	}
 	if m.SelectedPlaylist().ID != "PL2" {
 		t.Fatalf("cursor moved off PL2 to %s", m.SelectedPlaylist().ID)

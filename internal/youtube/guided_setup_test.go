@@ -78,7 +78,7 @@ func TestRunGuidedSetup_HappyPath(t *testing.T) {
 	var out bytes.Buffer
 
 	authorizerCalled := false
-	mockAuthorizer := func(ctx context.Context, c config.Config, channel, sPath, tPath string) error {
+	mockAuthorizer := func(_ context.Context, _ config.Config, channel, sPath, _ string) error {
 		authorizerCalled = true
 		if channel != "seminar" {
 			t.Errorf("expected channel 'seminar', got %q", channel)
@@ -129,7 +129,7 @@ func TestRunGuidedSetup_DeclineBrowserAuth(t *testing.T) {
 	var out bytes.Buffer
 
 	authorizerCalled := false
-	mockAuthorizer := func(ctx context.Context, c config.Config, channel, sPath, tPath string) error {
+	mockAuthorizer := func(_ context.Context, _ config.Config, _, _, _ string) error {
 		authorizerCalled = true
 		return nil
 	}
@@ -172,7 +172,7 @@ func TestRunGuidedSetup_ExistingTokenDeclineReauth(t *testing.T) {
 	var out bytes.Buffer
 
 	authorizerCalled := false
-	mockAuthorizer := func(ctx context.Context, c config.Config, channel, sPath, tPath string) error {
+	mockAuthorizer := func(_ context.Context, _ config.Config, _, _, _ string) error {
 		authorizerCalled = true
 		return nil
 	}

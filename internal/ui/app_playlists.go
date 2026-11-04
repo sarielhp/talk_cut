@@ -48,7 +48,7 @@ type plCreatedMsg struct {
 
 // handlePlaylistsKey processes keys on the playlists panel.
 func (a AppModel) handlePlaylistsKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
-	switch a.playlistsView.Mode() {
+	switch a.playlistsView.panelMode() {
 	case plModeCreate:
 		return a.handlePlaylistCreateKey(msg)
 	case plModeVideos:

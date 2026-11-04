@@ -320,7 +320,7 @@ func playlistCmd() clihelp.Command {
 					clihelp.String(&listChannel, "--channel <name>", "", "Target YouTube channel profile"),
 				},
 				Examples: []clihelp.Example{{Line: "talk_cut youtube playlist list", Description: "Show every playlist."}},
-				Run:      func(ctx *clihelp.Context) error { return runPlaylistListWith(listChannel) },
+				Run:      func(_ *clihelp.Context) error { return runPlaylistListWith(listChannel) },
 			},
 			{
 				Name: "create", Aliases: []string{"new"},

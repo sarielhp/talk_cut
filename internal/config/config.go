@@ -127,7 +127,7 @@ func SaveConfig(cfg Config) error {
 	}
 
 	dir := filepath.Join(home, ".config", "talk_cut")
-	if err := os.MkdirAll(dir, 0o755); err != nil {
+	if err = os.MkdirAll(dir, 0o755); err != nil {
 		return fmt.Errorf("creating config directory %q: %w", dir, err)
 	}
 

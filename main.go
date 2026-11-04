@@ -87,7 +87,7 @@ func executePipeline(opts *cliOptions) error {
 
 	ctx := context.Background()
 	if opts.transcribe || b.TranscriptPath == "" {
-		if err := ensureWhisperTranscript(ctx, b, cfg, opts.transcribe); err != nil {
+		if err = ensureWhisperTranscript(ctx, b, cfg, opts.transcribe); err != nil {
 			return fmt.Errorf("transcribing audio: %w", err)
 		}
 	}
@@ -185,7 +185,7 @@ func transcribeBundle(ctx context.Context, b *bundle.RecordingBundle, cfg config
 	defer os.Remove(tmpPath)
 
 	fmt.Printf("Extracting audio from %s...\n", filepath.Base(input))
-	if err := cutter.ExtractAudio(ctx, input, tmpPath); err != nil {
+	if err = cutter.ExtractAudio(ctx, input, tmpPath); err != nil {
 		return err
 	}
 

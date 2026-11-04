@@ -75,11 +75,11 @@ func resolveSecretsStep(reader *bufio.Reader, out io.Writer, cfg *config.Config,
 		return "", fmt.Errorf("client secrets file %q not found or invalid", secPath)
 	}
 
-	return promptForSecrets(reader, out, cfg, secPath)
+	return promptForSecrets(reader, out, secPath)
 }
 
 // promptForSecrets displays instructions and guides the user to supply client secrets.
-func promptForSecrets(reader *bufio.Reader, out io.Writer, cfg *config.Config, defaultPath string) (string, error) {
+func promptForSecrets(reader *bufio.Reader, out io.Writer, defaultPath string) (string, error) {
 	fmt.Fprintln(out, "\n[Step 1/3] Google OAuth Client Secrets")
 	fmt.Fprintf(out, "No valid client secrets file found at: %s\n\n", defaultPath)
 	fmt.Fprintln(out, "To create your client secrets:")
