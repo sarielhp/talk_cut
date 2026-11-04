@@ -472,16 +472,19 @@ Options:
 All quality and verification tools adhere to Go sizing standards (nesting depth &le; 4, branches &le; 15, audited via `go-audit`):
 
 ```bash
-make check        # Fast quality gate: format, go.mod, vet, staticcheck, go-audit, tests, build
-make check-full   # Full gate: fast gate + deep static-analysis + live headless tmux TUI tests
-make review       # Deep static review (dupl, gocritic, shadow, revive, govulncheck)
-make test         # Run unit test suite
-make test-tui     # Run interactive headless tmux TUI verification
-make test-scroll  # Run full 540-cue scroll test
-make commit       # Gated commit (verifies quality gate, stages, commits, records .verified_head)
-make bump         # Increment patch version (0.1.0 -> 0.1.1) and install
-make bump-minor   # Increment minor version (0.1.X -> 0.2.0) and install
+tools/check            # Fast gate: gofmt/tidy (no edits), vet, staticcheck, go-audit --strict, tests, build
+tools/gate --full      # Release gate: adds -race, govulncheck, gocritic, shadow, revive, dupl, live TUI tests
+tools/lint             # Static checks only
+tools/build            # Build ./talk_cut
+tools/commit "msg"     # Gate, stage, commit, record verification (no push)
+tools/bump             # Full gate, patch bump, commit, verified push (no install)
+tools/install          # Install to ~/bin/talk_cut and verify contents
+tools/release [--install] "msg"  # Commit + bump + push (+ optional install)
+make test-tui          # Interactive headless tmux TUI verification
+make test-scroll       # Full 540-cue scroll test
 ```
+
+Project choices (artifact, install target, extra checks) live in `tools/settings.rb`.
 
 ---
 
