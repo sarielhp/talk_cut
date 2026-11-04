@@ -17,6 +17,7 @@ import (
 	"strings"
 	"time"
 
+	"talk_cut/internal/ctxsleep"
 	"talk_cut/internal/model"
 )
 
@@ -147,7 +148,7 @@ func (c *Client) waitForReady(ctx context.Context) {
 		if c.serverReady(ctx) {
 			return
 		}
-		if err := sleepContext(ctx, c.healthInterval); err != nil {
+		if err := ctxsleep.Sleep(ctx, c.healthInterval); err != nil {
 			return
 		}
 	}
@@ -192,7 +193,7 @@ func (c *Client) postAudio(ctx context.Context, audioPath string) ([]byte, error
 		if !retryable || attempt == maxPostAttempts {
 			break
 		}
-		if sleepContext(ctx, c.healthInterval) != nil {
+		if ctxsleep.Sleep(ctx, c.healthInterval) != nil {
 			break
 		}
 	}
@@ -334,17 +335,5 @@ func isRetryableStatus(code int) bool {
 		return true
 	default:
 		return false
-	}
-}
-
-// sleepContext sleeps for d, returning early if ctx is cancelled.
-func sleepContext(ctx context.Context, d time.Duration) error {
-	timer := time.NewTimer(d)
-	defer timer.Stop()
-	select {
-	case <-ctx.Done():
-		return ctx.Err()
-	case <-timer.C:
-		return nil
 	}
 }

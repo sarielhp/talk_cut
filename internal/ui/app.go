@@ -4,7 +4,6 @@ package ui
 import (
 	"context"
 	"fmt"
-	"os"
 	"path/filepath"
 	"strings"
 	"time"
@@ -16,7 +15,6 @@ import (
 	"talk_cut/internal/config"
 	"talk_cut/internal/cutter"
 	"talk_cut/internal/model"
-	"talk_cut/internal/vtt"
 	"talk_cut/internal/youtube"
 )
 
@@ -683,8 +681,8 @@ func runCutWorker(
 	meta.Chapters = normalized
 	_ = model.SaveMetaFile(filepath.Dir(outVideo), meta)
 
-	writeChaptersFile(chaptersPath, normalized)
-	writeAdjustedVTT(vttPath, cues, cuts)
+	_ = cutter.WriteChaptersFile(chaptersPath, normalized)
+	_ = cutter.WriteAdjustedVTT(vttPath, cues, cuts)
 
 	// Write the talk document (YouTube metadata + kept-only transcript) locally
 	// so it exists the moment rendering finishes; the AI polish pass upgrades it
@@ -697,39 +695,4 @@ func runCutWorker(
 		vttPath:        vttPath,
 		transcriptPath: transcriptPath,
 	}
-}
-
-// writeChaptersFile writes adjusted YouTube chapters to disk.
-func writeChaptersFile(path string, chapters []model.ChapterMarker) {
-	f, err := os.Create(path)
-	if err != nil {
-		return
-	}
-	defer f.Close()
-
-	for _, ch := range chapters {
-		fmt.Fprintln(f, ch.FormatYouTubeLine())
-	}
-}
-
-// writeAdjustedVTT writes excised & retimed WebVTT subtitles to disk.
-func writeAdjustedVTT(path string, cues []model.SubtitleCue, cuts []model.CutInterval) {
-	var kept []model.SubtitleCue
-	for _, c := range cues {
-		if c.Action == model.ActionCut {
-			continue
-		}
-		adjCue := c
-		adjCue.Start = cutter.AdjustTime(c.Start, cuts)
-		adjCue.End = cutter.AdjustTime(c.End, cuts)
-		kept = append(kept, adjCue)
-	}
-
-	f, err := os.Create(path)
-	if err != nil {
-		return
-	}
-	defer f.Close()
-
-	_ = vtt.Write(f, kept)
 }

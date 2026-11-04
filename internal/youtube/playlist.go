@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
+	"talk_cut/internal/ctxsleep"
 	"time"
 )
 
@@ -175,7 +176,7 @@ func AddVideoToPlaylist(ctx context.Context, client *http.Client, playlistID, vi
 		if err == nil || !retryable || attempt == propagationRetries {
 			return err
 		}
-		if err := sleepContext(ctx, propagationRetryDelay); err != nil {
+		if err := ctxsleep.Sleep(ctx, propagationRetryDelay); err != nil {
 			return err
 		}
 	}
@@ -221,18 +222,6 @@ func insertPlaylistItem(ctx context.Context, client *http.Client, playlistID, vi
 	retryable := resp.StatusCode == http.StatusConflict ||
 		(resp.StatusCode == http.StatusNotFound && strings.Contains(bodyStr, "playlistNotFound"))
 	return retryable, fmt.Errorf("adding video to playlist failed (status %d): %s", resp.StatusCode, bodyStr)
-}
-
-// sleepContext waits for d or until ctx is done.
-func sleepContext(ctx context.Context, d time.Duration) error {
-	t := time.NewTimer(d)
-	defer t.Stop()
-	select {
-	case <-ctx.Done():
-		return ctx.Err()
-	case <-t.C:
-		return nil
-	}
 }
 
 // FindPlaylist searches channel playlists by ID, exact title, or title substring.
@@ -292,7 +281,7 @@ func RemoveVideoFromPlaylist(ctx context.Context, client *http.Client, playlistI
 		if err == nil && (len(itemIDs) > 0 || attempt == propagationRetries) {
 			break
 		}
-		if err := sleepContext(ctx, propagationRetryDelay); err != nil {
+		if err := ctxsleep.Sleep(ctx, propagationRetryDelay); err != nil {
 			return err
 		}
 	}

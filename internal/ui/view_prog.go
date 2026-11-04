@@ -66,12 +66,7 @@ func NewProgModel(outputPath string) ProgModel {
 func (m *ProgModel) SetDimensions(w, h int) {
 	m.width = w
 	m.height = h
-	if w > 20 {
-		m.progBar.Width = w - 20
-		if m.progBar.Width > 80 {
-			m.progBar.Width = 80
-		}
-	}
+	resizeProgressBar(&m.progBar, w)
 }
 
 // SetOutputPaths configures the exported artifact paths upon completion.
@@ -182,15 +177,7 @@ func (m ProgModel) launchPreview() tea.Cmd {
 
 // View renders the progress and completion screen.
 func (m ProgModel) View() string {
-	if m.width <= 0 || m.height <= 0 {
-		return "Processing..."
-	}
-
-	header := m.renderHeader()
-	content := m.renderBody()
-	footer := m.renderFooter()
-
-	return lipgloss.JoinVertical(lipgloss.Left, header, content, footer)
+	return renderScreen(m, m.width, m.height, "Processing...")
 }
 
 // renderHeader renders the top title bar.

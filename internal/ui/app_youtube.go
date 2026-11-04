@@ -405,10 +405,14 @@ func (a AppModel) handlePlaylistSelectKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 		if a.metaView.Metadata().HasPlaylist(pl.ID) {
 			a.youtubeView.SetPlaylistFeedback(fmt.Sprintf("Removing from %q...", pl.Title))
-			return a, a.removeVideoFromPlaylistCmd(pl.ID, pl.Title, videoID)
+			return a, a.playlistMembershipCmd(pl.ID, videoID, youtube.RemoveVideoFromPlaylist, func(err error) tea.Msg {
+				return ytVideoRemovedFromPlaylistMsg{playlistID: pl.ID, title: pl.Title, err: err}
+			})
 		}
 		a.youtubeView.SetPlaylistFeedback(fmt.Sprintf("Adding to %q...", pl.Title))
-		return a, a.addVideoToPlaylistCmd(pl.ID, pl.Title, videoID)
+		return a, a.playlistMembershipCmd(pl.ID, videoID, youtube.AddVideoToPlaylist, func(err error) tea.Msg {
+			return ytVideoAddedToPlaylistMsg{playlistID: pl.ID, title: pl.Title, err: err}
+		})
 	case "d":
 		pl := a.youtubeView.SelectedPlaylist()
 		if pl == nil {
@@ -450,35 +454,22 @@ func (a AppModel) fetchPlaylistsCmd() tea.Cmd {
 	}
 }
 
-// addVideoToPlaylistCmd adds the video to the target playlist via the YouTube API.
-func (a AppModel) addVideoToPlaylistCmd(playlistID, playlistTitle, videoID string) tea.Cmd {
-	channel := a.youtubeView.CurrentChannel()
-	cfg := a.cfg
-	return func() tea.Msg {
-		client, err := youtube.GetAuthenticatedClient(context.Background(), cfg, channel)
-		if err != nil {
-			return ytVideoAddedToPlaylistMsg{playlistID: playlistID, title: playlistTitle, err: err}
-		}
-		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
-		defer cancel()
-		err = youtube.AddVideoToPlaylist(ctx, client, playlistID, videoID)
-		return ytVideoAddedToPlaylistMsg{playlistID: playlistID, title: playlistTitle, err: err}
-	}
-}
+// playlistMembershipChange adds a video to, or removes it from, a playlist.
+type playlistMembershipChange func(ctx context.Context, client *http.Client, playlistID, videoID string) error
 
-// removeVideoFromPlaylistCmd removes the video from the target playlist via the YouTube API.
-func (a AppModel) removeVideoFromPlaylistCmd(playlistID, playlistTitle, videoID string) tea.Cmd {
+// playlistMembershipCmd authenticates on the current channel, applies change, and
+// reports its outcome through done.
+func (a AppModel) playlistMembershipCmd(playlistID, videoID string, change playlistMembershipChange, done func(error) tea.Msg) tea.Cmd {
 	channel := a.youtubeView.CurrentChannel()
 	cfg := a.cfg
 	return func() tea.Msg {
 		client, err := youtube.GetAuthenticatedClient(context.Background(), cfg, channel)
 		if err != nil {
-			return ytVideoRemovedFromPlaylistMsg{playlistID: playlistID, title: playlistTitle, err: err}
+			return done(err)
 		}
 		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 		defer cancel()
-		err = youtube.RemoveVideoFromPlaylist(ctx, client, playlistID, videoID)
-		return ytVideoRemovedFromPlaylistMsg{playlistID: playlistID, title: playlistTitle, err: err}
+		return done(change(ctx, client, playlistID, videoID))
 	}
 }
 

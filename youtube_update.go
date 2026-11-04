@@ -264,16 +264,23 @@ func printUpdateSuccess(meta model.TalkMetadata, channel string, ver *youtube.Vi
 	fmt.Printf("  Channel:    %s\n", channel)
 	fmt.Printf("  Privacy:    %s\n", strings.ToLower(meta.Privacy))
 	fmt.Printf("  Video URL:  %s\n", ver.ShortURL)
+	printPlaylistSummary(meta)
+	fmt.Printf("  Chapters:   %d markers synchronized\n", len(meta.Chapters))
+	fmt.Println("================================================================================")
+}
+
+// printPlaylistSummary prints the playlist line(s) of a success summary.
+func printPlaylistSummary(meta model.TalkMetadata) {
 	pls := meta.AllPlaylists()
 	if len(pls) == 1 {
 		fmt.Printf("  Playlist:   %s\n", pls[0].Title)
-	} else if len(pls) > 1 {
-		var titles []string
+		return
+	}
+	if len(pls) > 1 {
+		titles := make([]string, 0, len(pls))
 		for _, pl := range pls {
 			titles = append(titles, pl.Title)
 		}
 		fmt.Printf("  Playlists:  %s\n", strings.Join(titles, ", "))
 	}
-	fmt.Printf("  Chapters:   %d markers synchronized\n", len(meta.Chapters))
-	fmt.Println("================================================================================")
 }

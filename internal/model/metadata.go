@@ -121,27 +121,26 @@ func ExtractYouTubeID(raw string) string {
 	if len(raw) == 11 && !strings.ContainsAny(raw, "/?=&") {
 		return raw
 	}
-	if strings.Contains(raw, "youtu.be/") {
-		parts := strings.Split(raw, "youtu.be/")
-		if len(parts) > 1 {
-			id := parts[1]
-			if idx := strings.IndexAny(id, "?&"); idx != -1 {
-				id = id[:idx]
-			}
-			return strings.TrimSpace(id)
-		}
+	if id, ok := idAfter(raw, "youtu.be/", "?&"); ok {
+		return id
 	}
-	if strings.Contains(raw, "v=") {
-		parts := strings.Split(raw, "v=")
-		if len(parts) > 1 {
-			id := parts[1]
-			if idx := strings.IndexAny(id, "?&#"); idx != -1 {
-				id = id[:idx]
-			}
-			return strings.TrimSpace(id)
-		}
+	if id, ok := idAfter(raw, "v=", "?&#"); ok {
+		return id
 	}
 	return ""
+}
+
+// idAfter returns the text following the first marker in raw, cut at the
+// first of the stop characters; ok is false when raw has no marker.
+func idAfter(raw, marker, stops string) (string, bool) {
+	_, id, ok := strings.Cut(raw, marker)
+	if !ok {
+		return "", false
+	}
+	if idx := strings.IndexAny(id, stops); idx != -1 {
+		id = id[:idx]
+	}
+	return strings.TrimSpace(id), true
 }
 
 // AllPlaylists returns all associated playlists, synthesizing from legacy fields if needed.

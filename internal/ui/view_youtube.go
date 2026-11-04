@@ -11,6 +11,7 @@ import (
 	"github.com/charmbracelet/lipgloss"
 
 	"talk_cut/internal/config"
+	"talk_cut/internal/humanize"
 	"talk_cut/internal/model"
 	"talk_cut/internal/youtube"
 )
@@ -84,12 +85,7 @@ func NewYouTubeModel(videoPath, captionsPath string, meta model.TalkMetadata, cf
 func (m *YouTubeModel) SetDimensions(w, h int) {
 	m.width = w
 	m.height = h
-	if w > 20 {
-		m.progBar.Width = w - 20
-		if m.progBar.Width > 80 {
-			m.progBar.Width = 80
-		}
-	}
+	resizeProgressBar(&m.progBar, w)
 }
 
 // SetPreflight synchronizes video artifact paths and talk metadata.
@@ -182,7 +178,7 @@ func (m *YouTubeModel) SetProgress(bytesSent, totalBytes int64, percent float64,
 
 	switch stage {
 	case "uploading_video":
-		m.statusMsg = fmt.Sprintf("Uploading video: %.1f%% (%s / %s)", percent, formatBytes(bytesSent), formatBytes(totalBytes))
+		m.statusMsg = fmt.Sprintf("Uploading video: %.1f%% (%s / %s)", percent, humanize.Bytes(bytesSent), humanize.Bytes(totalBytes))
 	case "uploading_captions":
 		m.statusMsg = "Uploading closed captions track to YouTube..."
 	case "verifying":
@@ -361,15 +357,7 @@ func (m YouTubeModel) Update(msg tea.Msg) (YouTubeModel, tea.Cmd) {
 
 // View renders the full YouTube tab screen.
 func (m YouTubeModel) View() string {
-	if m.width <= 0 || m.height <= 0 {
-		return "YouTube Upload..."
-	}
-
-	header := m.renderHeader()
-	body := m.renderBody()
-	footer := m.renderFooter()
-
-	return lipgloss.JoinVertical(lipgloss.Left, header, body, footer)
+	return renderScreen(m, m.width, m.height, "YouTube Upload...")
 }
 
 // renderHeader renders the top tab bar.
@@ -413,7 +401,7 @@ func (m YouTubeModel) renderPreflightBox() string {
 
 	var videoStatus string
 	if m.videoExists {
-		videoStatus = m.theme.SuccessText.Render(fmt.Sprintf("✔ Rendered Cut Video Ready (%s)", formatBytes(m.videoSize)))
+		videoStatus = m.theme.SuccessText.Render(fmt.Sprintf("✔ Rendered Cut Video Ready (%s)", humanize.Bytes(m.videoSize)))
 	} else {
 		videoStatus = m.theme.WarningText.Render("⚠ Cut video not rendered yet (press [4] to render, or [r] to render now)")
 	}
@@ -511,7 +499,7 @@ func (m YouTubeModel) renderUploadingBox() string {
 	var stageDesc string
 	switch m.stage {
 	case "uploading_video":
-		stageDesc = fmt.Sprintf("Streaming video bytes to YouTube: %s / %s", formatBytes(m.bytesSent), formatBytes(m.totalBytes))
+		stageDesc = fmt.Sprintf("Streaming video bytes to YouTube: %s / %s", humanize.Bytes(m.bytesSent), humanize.Bytes(m.totalBytes))
 	case "uploading_captions":
 		stageDesc = "Uploading retimed WebVTT subtitles as closed captions..."
 	case "updating_details":
@@ -698,18 +686,4 @@ func (m YouTubeModel) boxWidth() int {
 		return 20
 	}
 	return w
-}
-
-// formatBytes formats an integer byte count into a human-readable size string.
-func formatBytes(b int64) string {
-	const unit = 1024
-	if b < unit {
-		return fmt.Sprintf("%d B", b)
-	}
-	div, exp := int64(unit), 0
-	for n := b / unit; n >= unit; n /= unit {
-		div *= unit
-		exp++
-	}
-	return fmt.Sprintf("%.1f %cB", float64(b)/float64(div), "KMGTPE"[exp])
 }

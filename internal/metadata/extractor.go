@@ -5,9 +5,7 @@ import (
 	"context"
 	"fmt"
 	"io"
-	"net/http"
 	"strings"
-	"time"
 
 	"golang.org/x/net/html"
 )
@@ -28,24 +26,13 @@ type TalkPageInfo struct {
 
 // FetchTalkInfo downloads and extracts structured talk metadata from a URL.
 func FetchTalkInfo(ctx context.Context, pageURL string) (TalkPageInfo, error) {
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, pageURL, nil)
+	body, err := fetchPage(ctx, pageURL, "Mozilla/5.0 (talk_cut; seminar metadata extractor)")
 	if err != nil {
-		return TalkPageInfo{}, fmt.Errorf("creating request for %q: %w", pageURL, err)
+		return TalkPageInfo{}, err
 	}
-	req.Header.Set("User-Agent", "Mozilla/5.0 (talk_cut; seminar metadata extractor)")
+	defer body.Close()
 
-	client := &http.Client{Timeout: 15 * time.Second}
-	resp, err := client.Do(req)
-	if err != nil {
-		return TalkPageInfo{}, fmt.Errorf("fetching %q: %w", pageURL, err)
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		return TalkPageInfo{}, fmt.Errorf("fetching %q returned status %d", pageURL, resp.StatusCode)
-	}
-
-	return ExtractTalkInfo(resp.Body, pageURL)
+	return ExtractTalkInfo(body, pageURL)
 }
 
 // ExtractTalkInfo parses an HTML document and extracts structured talk information.

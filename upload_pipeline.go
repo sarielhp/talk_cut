@@ -11,6 +11,7 @@ import (
 	"talk_cut/internal/bundle"
 	"talk_cut/internal/config"
 	"talk_cut/internal/cutter"
+	"talk_cut/internal/humanize"
 	"talk_cut/internal/model"
 	"talk_cut/internal/vtt"
 	"talk_cut/internal/youtube"
@@ -44,8 +45,8 @@ func runUploadPipeline(ctx context.Context, opts *cliOptions, cfg config.Config)
 		return renderErr
 	}
 
-	writeChaptersFile(chaptersPath, talkMeta.Chapters)
-	writeAdjustedVTT(vttPath, cues, cuts)
+	_ = cutter.WriteChaptersFile(chaptersPath, talkMeta.Chapters)
+	_ = cutter.WriteAdjustedVTT(vttPath, cues, cuts)
 
 	printUploadPreflight(channel, talkMeta, outPath)
 
@@ -160,7 +161,7 @@ func renderVideoIfNeeded(ctx context.Context, inVideo, outVideo string, cuts []m
 	}
 
 	if !needsRender {
-		fmt.Printf("✔ Using existing cut video: %s (%s)\n", outVideo, formatBytes(outStat.Size()))
+		fmt.Printf("✔ Using existing cut video: %s (%s)\n", outVideo, humanize.Bytes(outStat.Size()))
 		return nil
 	}
 
@@ -194,12 +195,12 @@ func performVideoUpload(ctx context.Context, client *http.Client, videoPath stri
 		return nil, fmt.Errorf("stat video %q: %w", videoPath, err)
 	}
 
-	fmt.Printf("\n[YouTube Upload] Uploading %s (%s)...\n", filepath.Base(videoPath), formatBytes(stat.Size()))
+	fmt.Printf("\n[YouTube Upload] Uploading %s (%s)...\n", filepath.Base(videoPath), humanize.Bytes(stat.Size()))
 	uploadOpts := youtube.UploadOptions{
 		VideoPath: videoPath,
 		Metadata:  meta,
 		OnProgress: func(bytesSent, totalBytes int64, percent float64) {
-			fmt.Printf("\r  Uploading: %.1f%% (%s / %s)   ", percent, formatBytes(bytesSent), formatBytes(totalBytes))
+			fmt.Printf("\r  Uploading: %.1f%% (%s / %s)   ", percent, humanize.Bytes(bytesSent), humanize.Bytes(totalBytes))
 		},
 	}
 
@@ -250,65 +251,7 @@ func printUploadSuccess(meta model.TalkMetadata, channel, url string, chaptersCo
 	fmt.Printf("  Channel:    %s\n", channel)
 	fmt.Printf("  Privacy:    %s\n", strings.ToLower(meta.Privacy))
 	fmt.Printf("  Video URL:  %s\n", url)
-	pls := meta.AllPlaylists()
-	if len(pls) == 1 {
-		fmt.Printf("  Playlist:   %s\n", pls[0].Title)
-	} else if len(pls) > 1 {
-		var titles []string
-		for _, pl := range pls {
-			titles = append(titles, pl.Title)
-		}
-		fmt.Printf("  Playlists:  %s\n", strings.Join(titles, ", "))
-	}
+	printPlaylistSummary(meta)
 	fmt.Printf("  Chapters:   %d markers synchronized\n", chaptersCount)
 	fmt.Println("================================================================================")
-}
-
-// formatBytes formats an integer byte count into a human-readable size string.
-func formatBytes(b int64) string {
-	const unit = 1024
-	if b < unit {
-		return fmt.Sprintf("%d B", b)
-	}
-	div, exp := int64(unit), 0
-	for n := b / unit; n >= unit; n /= unit {
-		div *= unit
-		exp++
-	}
-	return fmt.Sprintf("%.1f %cB", float64(b)/float64(div), "KMGTPE"[exp])
-}
-
-// writeChaptersFile writes adjusted YouTube chapters to disk.
-func writeChaptersFile(path string, chapters []model.ChapterMarker) {
-	f, err := os.Create(path)
-	if err != nil {
-		return
-	}
-	defer f.Close()
-
-	for _, ch := range chapters {
-		fmt.Fprintln(f, ch.FormatYouTubeLine())
-	}
-}
-
-// writeAdjustedVTT writes excised & retimed WebVTT subtitles to disk.
-func writeAdjustedVTT(path string, cues []model.SubtitleCue, cuts []model.CutInterval) {
-	var kept []model.SubtitleCue
-	for _, c := range cues {
-		if c.Action == model.ActionCut {
-			continue
-		}
-		adjCue := c
-		adjCue.Start = cutter.AdjustTime(c.Start, cuts)
-		adjCue.End = cutter.AdjustTime(c.End, cuts)
-		kept = append(kept, adjCue)
-	}
-
-	f, err := os.Create(path)
-	if err != nil {
-		return
-	}
-	defer f.Close()
-
-	_ = vtt.Write(f, kept)
 }

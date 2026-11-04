@@ -22,27 +22,34 @@ type WebContent struct {
 
 // FetchTalkPage downloads and cleans an announcement web page.
 func FetchTalkPage(ctx context.Context, pageURL string) (WebContent, error) {
+	body, err := fetchPage(ctx, pageURL, "Mozilla/5.0 (talk_cut; seminar metadata crawler)")
+	if err != nil {
+		return WebContent{}, err
+	}
+	defer body.Close()
+
+	return ExtractText(body, pageURL)
+}
+
+// fetchPage GETs pageURL with the given User-Agent and returns the body of a
+// 200 response; the caller closes it.
+func fetchPage(ctx context.Context, pageURL, userAgent string) (io.ReadCloser, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, pageURL, nil)
 	if err != nil {
-		return WebContent{}, fmt.Errorf("creating request for %q: %w", pageURL, err)
+		return nil, fmt.Errorf("creating request for %q: %w", pageURL, err)
 	}
-	req.Header.Set("User-Agent", "Mozilla/5.0 (talk_cut; seminar metadata crawler)")
+	req.Header.Set("User-Agent", userAgent)
 
-	client := &http.Client{
-		Timeout: 15 * time.Second,
-	}
-
+	client := &http.Client{Timeout: 15 * time.Second}
 	resp, err := client.Do(req)
 	if err != nil {
-		return WebContent{}, fmt.Errorf("fetching %q: %w", pageURL, err)
+		return nil, fmt.Errorf("fetching %q: %w", pageURL, err)
 	}
-	defer resp.Body.Close()
-
 	if resp.StatusCode != http.StatusOK {
-		return WebContent{}, fmt.Errorf("fetching %q returned status %d", pageURL, resp.StatusCode)
+		resp.Body.Close()
+		return nil, fmt.Errorf("fetching %q returned status %d", pageURL, resp.StatusCode)
 	}
-
-	return ExtractText(resp.Body, pageURL)
+	return resp.Body, nil
 }
 
 // ExtractText parses an HTML stream into clean, readable text.
