@@ -444,7 +444,11 @@ module Tooling
     published = false
     upstream
     version
-    script('commit', message)
+    if git('status', '--porcelain').empty?
+      puts 'Nothing to commit; continuing with the bump.'
+    else
+      script('commit', message)
+    end
     script('bump')
     published = true
     return puts('No INSTALL_TARGETS declared; installation skipped.') if ToolSettings::INSTALL_TARGETS.empty?

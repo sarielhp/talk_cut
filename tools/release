@@ -8,7 +8,8 @@ HELP = <<~TEXT
 
   Publish a release: commit, bump the version, push, and install.
 
-    1. Commit the pending work as <message>, after the fast gate (tools/commit).
+    1. Commit the pending work as <message>, after the fast gate (tools/commit);
+       skipped when there is nothing to commit.
     2. Bump the patch version, run VERSION_UPDATE, run the full gate, commit
        "chore: bump version to X.Y.Z" and push it to the upstream branch,
        verified (tools/bump).
