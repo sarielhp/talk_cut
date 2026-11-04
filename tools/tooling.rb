@@ -440,14 +440,14 @@ module Tooling
     puts 'Installation verified'
   end
 
-  def release(message, install_requested)
+  def release(message)
     published = false
     upstream
     version
     script('commit', message)
     script('bump')
     published = true
-    return unless install_requested
+    return puts('No INSTALL_TARGETS declared; installation skipped.') if ToolSettings::INSTALL_TARGETS.empty?
 
     script('install')
   rescue StandardError => e

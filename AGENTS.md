@@ -18,7 +18,7 @@ Use the exact command forms when applicable:
 | `rtk proxy tools/bump` | Requested version bump and verified push |
 | `rtk proxy tools/bump --resume` | Resume an inspected failed push without bumping again |
 | `rtk proxy tools/install` | Requested installation to declared targets |
-| `rtk proxy tools/release [--install] <message>` | Requested release, with installation only when authorized |
+| `rtk proxy tools/release <message>` | Requested release; always installs to the declared targets via tools/install |
 
 Run routine build, lint, test, and gate checks for authorized work. Existing
 command approval allows execution; it does not authorize unrelated commits,

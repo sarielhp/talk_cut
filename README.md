@@ -479,7 +479,7 @@ tools/build            # Build ./talk_cut
 tools/commit "msg"     # Gate, stage, commit, record verification (no push)
 tools/bump             # Full gate, patch bump, commit, verified push (no install)
 tools/install          # Install to ~/bin/talk_cut and verify contents
-tools/release [--install] "msg"  # Commit + bump + push (+ optional install)
+tools/release "msg"    # Commit + bump + push + install to ~/bin/talk_cut
 make test-tui          # Interactive headless tmux TUI verification
 make test-scroll       # Full 540-cue scroll test
 ```
