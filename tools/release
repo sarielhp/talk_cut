@@ -12,13 +12,16 @@ HELP = <<~TEXT
        skipped when there is nothing to commit.
     2. Bump the patch version, run VERSION_UPDATE, run the full gate, commit
        "chore: bump version to X.Y.Z" and push it to the upstream branch,
-       verified (tools/bump).
+       verified (tools/bump);
+       skipped when HEAD is already the pushed release commit.
     3. Install the built artifacts to INSTALL_TARGETS (tools/install);
-       skipped, with a notice, when no targets are declared.
+       skipped, with a notice, when no targets are declared;
+       a target that already matches the build is left alone.
 
-  Steps 1 and 2 change the remote branch and are not undone by rerunning. If a
-  step fails, the message says what was published; an interrupted bump is
-  finished with tools/bump --resume.
+  Rerunning after a success does nothing but confirm it. Steps 1 and 2 change
+  the remote repository and are not undone by rerunning. If a step fails, the
+  message says what was published; an interrupted bump is finished with
+  tools/bump --resume.
 
   Options:
     --install   Accepted for compatibility; installation always runs.
