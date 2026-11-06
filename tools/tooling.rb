@@ -357,7 +357,9 @@ module Tooling
   end
 
   def bump
-    raise 'unfinished release; use tools/bump --resume after inspecting local state' if File.exist?(state_path('release'))
+    if File.exist?(state_path('release'))
+      raise 'unfinished release; use tools/bump --resume after inspecting local state, or --abandon if nothing was published'
+    end
 
     remote, ref = upstream
     path, current = version
@@ -379,7 +381,8 @@ module Tooling
     File.write(state_path('release'), JSON.generate(data))
     push_release(data)
   rescue StandardError => e
-    raise "#{e.message}\nLocal state retained. Inspect changes; tools/bump --resume never increments the version."
+    raise "#{e.message}\nLocal state retained. Inspect changes; tools/bump --resume never increments the version; " \
+          'tools/bump --abandon drops an unpublished release.'
   end
 
   def resume
@@ -393,8 +396,41 @@ module Tooling
     push_release(data)
   end
 
+  # Drops a pending release that never reached the remote, so a bump that can
+  # no longer resume (HEAD moved, the fix needed a commit) does not need its
+  # state file deleted by hand. The bump commit goes only while HEAD is still
+  # that commit; an uncommitted pending version is restored. Other files the
+  # bump touched are listed, not reverted.
+  def abandon
+    path = state_path('release')
+    raise 'no interrupted release to abandon' unless File.file?(path)
+
+    data = JSON.parse(File.read(path), symbolize_names: true)
+    data[:commit] ? drop_release_commit(data) : restore_pending_version(data)
+    FileUtils.rm_f(path)
+    puts "Abandoned release #{data.fetch(:version)}; nothing was published"
+    left = git('status', '--porcelain')
+    puts "Left for inspection:\n#{left}" unless left.empty?
+  end
+
+  def drop_release_commit(data)
+    commit = data.fetch(:commit)
+    if git('ls-remote', data.fetch(:remote), data.fetch(:ref)).split.first == commit
+      raise 'the release already reached the remote; finish it with tools/bump --resume'
+    end
+    raise 'HEAD is no longer the release commit; inspect and remove it by hand' unless head == commit
+    raise 'abandon requires a clean working tree' unless git('status', '--porcelain').empty?
+
+    git('reset', '--keep', "#{commit}^")
+  end
+
+  def restore_pending_version(data)
+    file, value = version
+    git('checkout', 'HEAD', '--', file) if value == data.fetch(:version)
+  end
+
   def complete_pending_commit(data)
-    raise 'HEAD changed before pending release commit; inspect local history' unless head == data.fetch(:base)
+    raise 'HEAD changed before pending release commit; inspect, then drop it with tools/bump --abandon' unless head == data.fetch(:base)
     raise 'pending version changed; inspect local files' unless version.last == data.fetch(:version)
 
     script('gate', '--full')
@@ -476,7 +512,7 @@ module Tooling
           'inspect, then use tools/bump --resume or push it'
   end
 
-  def release(message)
+  def release(message, install: true)
     published = false
     upstream
     version
@@ -491,6 +527,7 @@ module Tooling
       script('bump')
     end
     published = true
+    return puts('--no-install: installation skipped.') unless install
     return puts('No INSTALL_TARGETS declared; installation skipped.') if ToolSettings::INSTALL_TARGETS.empty?
 
     script('install')

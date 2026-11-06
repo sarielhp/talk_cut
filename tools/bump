@@ -4,7 +4,7 @@
 require_relative 'tooling'
 
 HELP = <<~TEXT
-  Usage: tools/bump [--resume]
+  Usage: tools/bump [--resume|--abandon]
 
   Release the committed tree. The working tree must be clean.
 
@@ -19,10 +19,16 @@ HELP = <<~TEXT
   Options:
     --resume    Finish a bump that stopped after its local commit, without
                 bumping the version again. Refused if HEAD has moved.
+    --abandon   Drop a stopped bump that published nothing: remove its
+                unpushed commit, or restore the version file.
     -h, --help  Show this help; nothing is run.
 TEXT
 
 Tooling.entry(HELP) do
-  abort 'Usage: tools/bump [--resume]' unless ARGV.empty? || ARGV == ['--resume']
-  ARGV.empty? ? Tooling.bump : Tooling.resume
+  abort 'Usage: tools/bump [--resume|--abandon]' unless ARGV.empty? || [['--resume'], ['--abandon']].include?(ARGV)
+  case ARGV.first
+  when '--resume' then Tooling.resume
+  when '--abandon' then Tooling.abandon
+  else Tooling.bump
+  end
 end
