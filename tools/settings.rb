@@ -16,6 +16,6 @@ module ToolSettings
   # test) runs the current binary rather than a stale ./talk_cut.
   FULL_CHECKS = [%w[tools/build], %w[ruby tools/live_tui_test.rb -q --scroll]].freeze
   TEST_TIMEOUT = '180s'
-  # Text inputs of the live TUI test (the multi-GB media files are not digested).
-  VERIFICATION_INPUTS = ['examples/26_09_08/*.{vtt,json,txt}'].freeze
+  # The live TUI test makes its own recording (tools/tui_fixture.rb, digested with tools/**).
+  VERIFICATION_INPUTS = [].freeze
 end

@@ -2,10 +2,13 @@
 # frozen_string_literal: true
 
 require 'open3'
-require 'tmpdir'
 require 'fileutils'
 require 'optparse'
 require 'json'
+require_relative 'tmp_space'
+require_relative 'tui_fixture'
+
+ProjectTmp.project = 'talk_cut'
 
 # live_tui_test.rb
 # Production-grade headless character-level snapshot testing for talk_cut TUI.
@@ -20,6 +23,8 @@ require 'json'
 # - Full 540-cue scroll test: asserts top line 0 ('talk_cut') and bottom footer ('Cue X/540') invariants
 # - SIGWINCH responsive terminal resize tests (80x24 compact vs 130x35 wide)
 # - Persistence cycle test (reloads auto-saved decisions from disk)
+#
+# The recording is synthetic (tools/tui_fixture.rb), so no real recording is needed.
 
 class TUISnapshotTester
   attr_reader :session_name, :tmp_dir, :cols, :rows, :snapshots
@@ -367,8 +372,10 @@ class TUISnapshotTester
   end
 
   def check_dependencies!
-    `which tmux 2>/dev/null`.strip.tap do |p|
-      abort "\e[31mError: tmux is required for headless character-level TUI testing.\e[0m" if p.empty?
+    %w[tmux ffmpeg ffprobe].each do |tool|
+      next unless `which #{tool} 2>/dev/null`.strip.empty?
+
+      abort "\e[31mError: #{tool} is required for the headless TUI test.\e[0m"
     end
     binary = File.expand_path('../talk_cut', __dir__)
     return if File.exist?(binary)
@@ -378,18 +385,8 @@ class TUISnapshotTester
   end
 
   def setup_sandbox!
-    @tmp_dir = Dir.mktmpdir('talk_cut_tui_test_')
-    example_dir = File.expand_path('../examples/26_09_08', __dir__)
-    Dir.glob("#{example_dir}/*").each do |file|
-      # Exclude pre-existing cuts file so test operates on a fresh clean recording
-      next if File.basename(file) == 'talk_cuts.json'
-
-      if File.basename(file) == 'talk_meta.json'
-        FileUtils.cp(file, File.join(@tmp_dir, File.basename(file)))
-      else
-        FileUtils.ln_sf(file, File.join(@tmp_dir, File.basename(file)))
-      end
-    end
+    @tmp_dir = ProjectTmp.mktmpdir('tui-test')
+    TUIFixture.write(@tmp_dir)
   end
 
   def launch_app!
