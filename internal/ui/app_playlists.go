@@ -9,9 +9,16 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 
+	"talk_cut/internal/config"
 	"talk_cut/internal/model"
 	"talk_cut/internal/youtube"
 )
+
+// playlistCallTimeout bounds a single playlist read or write.
+const playlistCallTimeout = 30 * time.Second
+
+// playlistTidyTimeout bounds a tidy, which makes one write per duplicate and per moved item.
+const playlistTidyTimeout = 10 * time.Minute
 
 type plPanelLoadedMsg struct {
 	channel   string
@@ -46,107 +53,172 @@ type plCreatedMsg struct {
 	err      error
 }
 
+// plTidyMsg carries a tidy plan (dryRun) or the result of applying one.
+type plTidyMsg struct {
+	playlist youtube.Playlist
+	dryRun   bool
+	result   youtube.TidyResult
+	err      error
+}
+
+// plSession is what the playlists panel needs to talk to YouTube; it does not depend on a recording.
+type plSession struct {
+	cfg     config.Config
+	channel string
+}
+
+// playlistSession returns the session for the YouTube tab's current channel.
+func (a AppModel) playlistSession() plSession {
+	return plSession{cfg: a.cfg, channel: a.youtubeView.CurrentChannel()}
+}
+
 // handlePlaylistsKey processes keys on the playlists panel.
 func (a AppModel) handlePlaylistsKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
-	switch a.playlistsView.panelMode() {
-	case plModeCreate:
-		return a.handlePlaylistCreateKey(msg)
-	case plModeVideos:
-		return a.handlePlaylistVideosKey(msg)
-	}
-	switch msg.String() {
-	case "q":
-		a.cutsView.Close()
-		return a, tea.Quit
-	case "esc":
-		a.switchTab(ScreenCuts)
-		return a, nil
-	case "up", "k":
-		a.playlistsView.MoveCursor(-1)
-	case "down", "j":
-		a.playlistsView.MoveCursor(1)
-	case "enter", "l":
-		return a.openSelectedPlaylist()
-	case "n":
-		cmd := a.playlistsView.BeginCreate()
-		return a, cmd
-	case "o":
-		openSelectedPlaylistInBrowser(a.playlistsView.SelectedPlaylist())
-	case "c":
-		return a, copyPlaylistLinkCmd(a.playlistsView.SelectedPlaylist())
-	case "r":
-		cmd := a.loadPlaylistPanelCmd()
-		return a, cmd
-	}
-	return a, nil
-}
-
-// handlePlaylistVideosKey processes keys in the membership view of one playlist.
-func (a AppModel) handlePlaylistVideosKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
-	switch msg.String() {
-	case "esc", "h", "backspace":
-		a.playlistsView.BackToList()
-	case "up", "k":
-		a.playlistsView.MoveCursor(-1)
-	case "down", "j":
-		a.playlistsView.MoveCursor(1)
-	case " ", "x", "enter":
-		cmd := a.toggleSelectedVideo()
-		return a, cmd
-	case "o":
-		openSelectedPlaylistInBrowser(a.playlistsView.SelectedPlaylist())
-	case "c":
-		return a, copyPlaylistLinkCmd(a.playlistsView.SelectedPlaylist())
-	case "r":
-		return a.openSelectedPlaylist()
-	}
-	return a, nil
-}
-
-// handlePlaylistCreateKey processes keys in the new-playlist form.
-func (a AppModel) handlePlaylistCreateKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
-	switch msg.String() {
-	case "esc":
-		a.playlistsView.CancelCreate()
-		return a, nil
-	case "tab":
-		a.playlistsView.CyclePrivacy()
-		return a, nil
-	case "enter":
-		title, privacy, ok := a.playlistsView.CreateRequest()
-		if !ok {
+	if a.playlistsView.panelMode() == plModeList && !a.playlistsView.AwaitingTidyConfirm() {
+		switch msg.String() {
+		case "q":
+			a.cutsView.Close()
+			return a, tea.Quit
+		case "esc":
+			a.switchTab(ScreenCuts)
 			return a, nil
 		}
-		a.playlistsView.SetCreating(title)
-		return a, a.createPlaylistCmd(title, privacy)
 	}
-	var cmd tea.Cmd
-	a.playlistsView, cmd = a.playlistsView.Update(msg)
+	cmd := handlePlaylistPanelKey(&a.playlistsView, a.playlistSession(), msg)
 	return a, cmd
 }
 
-// openSelectedPlaylist enters the membership view and fetches the playlist's contents.
-func (a AppModel) openSelectedPlaylist() (tea.Model, tea.Cmd) {
-	pl := a.playlistsView.SelectedPlaylist()
-	if pl == nil {
-		return a, nil
+// handlePlaylistPanelKey processes the panel keys shared by the TUI tab and the standalone editor.
+func handlePlaylistPanelKey(v *PlaylistsModel, s plSession, msg tea.KeyMsg) tea.Cmd {
+	if v.AwaitingTidyConfirm() {
+		pl, ok := v.ConfirmTidy(msg.String() == "y")
+		if !ok {
+			return nil
+		}
+		return s.tidyCmd(pl, false)
 	}
-	seq := a.playlistsView.OpenPlaylist()
-	return a, a.fetchPlaylistMembersCmd(seq, pl.ID)
+	switch v.panelMode() {
+	case plModeCreate:
+		return handlePlaylistCreateKey(v, s, msg)
+	case plModeVideos:
+		return handlePlaylistVideosKey(v, s, msg)
+	}
+	switch msg.String() {
+	case "up", "k":
+		v.MoveCursor(-1)
+	case "down", "j":
+		v.MoveCursor(1)
+	case "enter", "l":
+		return openSelectedPlaylist(v, s)
+	case "n":
+		return v.BeginCreate()
+	case "t":
+		return startTidy(v, s)
+	case "o":
+		openSelectedPlaylistInBrowser(v.SelectedPlaylist())
+	case "c":
+		return copyPlaylistLinkCmd(v.SelectedPlaylist())
+	case "r":
+		return s.loadPanelCmd(v)
+	}
+	return nil
 }
 
-// toggleSelectedVideo adds or removes the video under the cursor from the open playlist.
-func (a *AppModel) toggleSelectedVideo() tea.Cmd {
-	pl := a.playlistsView.SelectedPlaylist()
-	v := a.playlistsView.SelectedVideo()
-	if pl == nil || v == nil || !a.playlistsView.MembershipKnown() || a.playlistsView.IsPending(v.ID) {
+// handlePlaylistVideosKey processes keys in the membership view of one playlist.
+func handlePlaylistVideosKey(v *PlaylistsModel, s plSession, msg tea.KeyMsg) tea.Cmd {
+	switch msg.String() {
+	case "esc", "h", "backspace":
+		v.BackToList()
+	case "up", "k":
+		v.MoveCursor(-1)
+	case "down", "j":
+		v.MoveCursor(1)
+	case " ", "x", "enter":
+		return s.toggleSelectedVideoCmd(v)
+	case "t":
+		return startTidy(v, s)
+	case "o":
+		openSelectedPlaylistInBrowser(v.SelectedPlaylist())
+	case "c":
+		return copyPlaylistLinkCmd(v.SelectedPlaylist())
+	case "r":
+		return openSelectedPlaylist(v, s)
+	}
+	return nil
+}
+
+// handlePlaylistCreateKey processes keys in the new-playlist form.
+func handlePlaylistCreateKey(v *PlaylistsModel, s plSession, msg tea.KeyMsg) tea.Cmd {
+	switch msg.String() {
+	case "esc":
+		v.CancelCreate()
+		return nil
+	case "tab":
+		v.CyclePrivacy()
+		return nil
+	case "enter":
+		title, privacy, ok := v.CreateRequest()
+		if !ok {
+			return nil
+		}
+		v.SetCreating(title)
+		return s.createCmd(title, privacy)
+	}
+	var cmd tea.Cmd
+	*v, cmd = v.Update(msg)
+	return cmd
+}
+
+// applyPlaylistPanelMsg applies the results shared by both hosts of the panel; it reports whether msg was one.
+func applyPlaylistPanelMsg(v *PlaylistsModel, msg tea.Msg) bool {
+	switch msg := msg.(type) {
+	case plPanelLoadedMsg:
+		v.SetLoaded(msg.channel, msg.playlists, msg.videos, msg.err)
+	case plMembersLoadedMsg:
+		v.SetMembers(msg.seq, msg.playlistID, msg.ids, msg.err)
+	case plCreatedMsg:
+		v.ApplyCreated(msg.channel, msg.playlist, msg.err)
+	case plCopiedMsg:
+		v.SetCopied(msg.playlist, playlistURL(msg.playlist.ID), msg.err)
+	case plTidyMsg:
+		v.ApplyTidy(msg.playlist, msg.dryRun, msg.result, msg.err)
+	default:
+		return false
+	}
+	return true
+}
+
+// openSelectedPlaylist enters the membership view and fetches the playlist's contents.
+func openSelectedPlaylist(v *PlaylistsModel, s plSession) tea.Cmd {
+	pl := v.SelectedPlaylist()
+	if pl == nil {
 		return nil
 	}
-	adding := !a.playlistsView.IsMember(v.ID)
-	a.playlistsView.SetPending(v.ID, v.Title, adding)
+	seq := v.OpenPlaylist()
+	return s.fetchMembersCmd(seq, pl.ID)
+}
 
-	playlistID, playlistTitle, videoID := pl.ID, pl.Title, v.ID
-	return a.withYouTubeClient(func(ctx context.Context, client *http.Client) tea.Msg {
+// startTidy plans a tidy of the selected playlist; the user confirms before anything is written.
+func startTidy(v *PlaylistsModel, s plSession) tea.Cmd {
+	pl := v.SelectedPlaylist()
+	if pl == nil || !v.BeginTidy() {
+		return nil
+	}
+	return s.tidyCmd(*pl, true)
+}
+
+// toggleSelectedVideoCmd adds or removes the video under the cursor from the open playlist.
+func (s plSession) toggleSelectedVideoCmd(v *PlaylistsModel) tea.Cmd {
+	pl := v.SelectedPlaylist()
+	vid := v.SelectedVideo()
+	if pl == nil || vid == nil || !v.MembershipKnown() || v.IsPending(vid.ID) {
+		return nil
+	}
+	adding := !v.IsMember(vid.ID)
+	v.SetPending(vid.ID, vid.Title, adding)
+
+	playlistID, playlistTitle, videoID := pl.ID, pl.Title, vid.ID
+	return s.run(playlistCallTimeout, func(ctx context.Context, client *http.Client) tea.Msg {
 		var err error
 		if adding {
 			err = youtube.AddVideoToPlaylist(ctx, client, playlistID, videoID)
@@ -159,11 +231,11 @@ func (a *AppModel) toggleSelectedVideo() tea.Cmd {
 	})
 }
 
-// loadPlaylistPanelCmd fetches the channel's playlists and its most recent uploads.
-func (a *AppModel) loadPlaylistPanelCmd() tea.Cmd {
-	channel := a.youtubeView.CurrentChannel()
-	a.playlistsView.SetLoading(channel)
-	return a.withYouTubeClient(func(ctx context.Context, client *http.Client) tea.Msg {
+// loadPanelCmd fetches the channel's playlists and its most recent uploads.
+func (s plSession) loadPanelCmd(v *PlaylistsModel) tea.Cmd {
+	channel := s.channel
+	v.SetLoading(channel)
+	return s.run(playlistCallTimeout, func(ctx context.Context, client *http.Client) tea.Msg {
 		pls, err := youtube.ListPlaylists(ctx, client)
 		if err != nil {
 			return plPanelLoadedMsg{channel: channel, err: err}
@@ -175,9 +247,9 @@ func (a *AppModel) loadPlaylistPanelCmd() tea.Cmd {
 	})
 }
 
-// fetchPlaylistMembersCmd reads the set of videos contained in a playlist.
-func (a AppModel) fetchPlaylistMembersCmd(seq int, playlistID string) tea.Cmd {
-	return a.withYouTubeClient(func(ctx context.Context, client *http.Client) tea.Msg {
+// fetchMembersCmd reads the set of videos contained in a playlist.
+func (s plSession) fetchMembersCmd(seq int, playlistID string) tea.Cmd {
+	return s.run(playlistCallTimeout, func(ctx context.Context, client *http.Client) tea.Msg {
 		ids, err := youtube.ListPlaylistVideoIDs(ctx, client, playlistID)
 		return plMembersLoadedMsg{seq: seq, playlistID: playlistID, ids: ids, err: err}
 	}, func(err error) tea.Msg {
@@ -185,10 +257,10 @@ func (a AppModel) fetchPlaylistMembersCmd(seq int, playlistID string) tea.Cmd {
 	})
 }
 
-// createPlaylistCmd creates a playlist on the current channel.
-func (a AppModel) createPlaylistCmd(title, privacy string) tea.Cmd {
-	channel := a.youtubeView.CurrentChannel()
-	return a.withYouTubeClient(func(ctx context.Context, client *http.Client) tea.Msg {
+// createCmd creates a playlist on the session's channel.
+func (s plSession) createCmd(title, privacy string) tea.Cmd {
+	channel := s.channel
+	return s.run(playlistCallTimeout, func(ctx context.Context, client *http.Client) tea.Msg {
 		pl, err := youtube.CreatePlaylist(ctx, client, title, "", privacy)
 		return plCreatedMsg{channel: channel, playlist: pl, err: err}
 	}, func(err error) tea.Msg {
@@ -196,19 +268,41 @@ func (a AppModel) createPlaylistCmd(title, privacy string) tea.Cmd {
 	})
 }
 
-// withYouTubeClient runs fn in the background with an authenticated client for the current channel.
-func (a AppModel) withYouTubeClient(fn func(context.Context, *http.Client) tea.Msg, onAuthErr func(error) tea.Msg) tea.Cmd {
-	channel := a.youtubeView.CurrentChannel()
-	cfg := a.cfg
+// tidyCmd plans (dryRun) or applies the removal of repeated videos and the newest-first order.
+func (s plSession) tidyCmd(pl youtube.Playlist, dryRun bool) tea.Cmd {
+	timeout := playlistTidyTimeout
+	if dryRun {
+		timeout = playlistCallTimeout
+	}
+	return s.run(timeout, func(ctx context.Context, client *http.Client) tea.Msg {
+		res, err := youtube.TidyPlaylist(ctx, client, pl.ID, dryRun, nil)
+		return plTidyMsg{playlist: pl, dryRun: dryRun, result: res, err: err}
+	}, func(err error) tea.Msg {
+		return plTidyMsg{playlist: pl, dryRun: dryRun, err: err}
+	})
+}
+
+// run calls fn in the background with an authenticated client for the session's channel.
+func (s plSession) run(timeout time.Duration, fn func(context.Context, *http.Client) tea.Msg, onAuthErr func(error) tea.Msg) tea.Cmd {
 	return func() tea.Msg {
-		client, err := youtube.GetAuthenticatedClient(context.Background(), cfg, channel)
+		client, err := youtube.GetAuthenticatedClient(context.Background(), s.cfg, s.channel)
 		if err != nil {
-			return onAuthErr(fmt.Errorf("authenticating for channel %q: %w", channel, err))
+			return onAuthErr(fmt.Errorf("authenticating for channel %q: %w", s.channel, err))
 		}
-		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		ctx, cancel := context.WithTimeout(context.Background(), timeout)
 		defer cancel()
 		return fn(ctx, client)
 	}
+}
+
+// withYouTubeClient runs fn in the background with an authenticated client for the current channel.
+func (a AppModel) withYouTubeClient(fn func(context.Context, *http.Client) tea.Msg, onAuthErr func(error) tea.Msg) tea.Cmd {
+	return a.playlistSession().run(playlistCallTimeout, fn, onAuthErr)
+}
+
+// loadPlaylistPanelCmd fetches the panel's data for the YouTube tab's current channel.
+func (a *AppModel) loadPlaylistPanelCmd() tea.Cmd {
+	return a.playlistSession().loadPanelCmd(&a.playlistsView)
 }
 
 // handlePlaylistToggled records a membership change and mirrors it into the talk's metadata.

@@ -53,7 +53,7 @@ func TestCLISurface(t *testing.T) {
 		{name: "youtube alone lists its subcommands", args: []string{"youtube"}, exit: 0,
 			contains: []string{"update", "playlist", "setup", "status"}},
 		{name: "youtube playlist alone lists its own", args: []string{"youtube", "playlist"}, exit: 0,
-			contains: []string{"list", "create", "set-default", "add", "remove"}},
+			contains: []string{"list", "create", "set-default", "add", "remove", "tidy"}},
 
 		{name: "an unknown youtube subcommand", args: []string{"youtube", "nosuch"}, exit: 1,
 			contains: []string{`unknown command "nosuch" for "youtube"`}},

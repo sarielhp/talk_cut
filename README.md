@@ -48,7 +48,8 @@ flowchart TD
 - **Subtitle & Chapter Synchronization**: Produces retimed WebVTT (`_cut.vtt`) subtitle files and a ready-to-paste YouTube chapter file (`_chapters.txt`).
 - **Multi-Channel YouTube Publishing**: Built-in OAuth2 desktop authorization loopback server supporting multiple channel profiles (e.g. `--channel seminar`, `--channel course`), resumable video uploads, and automated caption track publishing.
 - **YouTube Details & Chapter Synchronization**: Update video title, description (with adjusted chapters and talk link), tags, privacy, and playlist assignments on YouTube for already-uploaded talks via `talk_cut youtube update` or directly from Tab 5 (<kbd>d</kbd> / <kbd>Enter</kbd>), with built-in duration validation (&plusmn;1s tolerance).
-- **Multi-Playlist Management**: Organize talks across multiple YouTube playlists from the CLI (`talk_cut youtube playlist list|create|set-default|add|remove`) or interactively within the TUI.
+- **Multi-Playlist Management**: Organize talks across multiple YouTube playlists from the CLI (`talk_cut youtube playlist list|create|set-default|add|remove|tidy`), interactively within the TUI, or in a standalone playlist editor (`talk_cut playlists`) that needs no recording.
+- **Playlist Tidy**: `talk_cut youtube playlist tidy` (or <kbd>t</kbd> in the playlist panel) removes repeated copies of a video and orders the playlist by video publish day, newest first, directly on YouTube.
 - **Strict Security Model**: Zero hardcoded secrets or API tokens. OpenRouter keys and OAuth tokens are stored in `~/.config/auth/` with `0600` permissions.
 
 ---
@@ -143,6 +144,13 @@ talk_cut youtube playlist create "Geometry Seminar Fall 2026" --default
 
 # Add an uploaded talk to a playlist:
 talk_cut youtube playlist add "Geometry Seminar Fall 2026" examples/26_09_08/
+
+# Remove repeated videos and order newest first (preview, then apply):
+talk_cut youtube playlist tidy --dry-run "Geometry Seminar Fall 2026"
+talk_cut youtube playlist tidy --all
+
+# Edit playlists in the TUI without a recording:
+talk_cut playlists --channel seminar
 ```
 
 ---
@@ -256,13 +264,14 @@ talk_cut youtube playlist add "Geometry Seminar Fall 2026" examples/26_09_08/
 
 ### [6] Playlists Screen
 
-Browse the channel's playlists, create new ones, and edit which of the channel's 20 most recent uploads belong to each playlist. Playlists and uploads load when the tab is first opened; the channel is the one selected in the YouTube tab.
+Browse the channel's playlists, create new ones, and edit which of the channel's 20 most recent uploads belong to each playlist. Playlists and uploads load when the tab is first opened; the channel is the one selected in the YouTube tab. The same panel runs on its own, without a recording, as `talk_cut playlists [--channel <name>]`; there <kbd>q</kbd> or <kbd>Esc</kbd> on the playlist list quits.
 
 | Key | Action |
 |---|---|
 | <kbd>↓</kbd> / <kbd>↑</kbd> (or <kbd>j</kbd>/<kbd>k</kbd>) | Move the cursor |
 | <kbd>Enter</kbd> | Open the selected playlist and show recent uploads with `[✔]` membership marks |
 | <kbd>Space</kbd> / <kbd>Enter</kbd> / <kbd>x</kbd> (in a playlist) | Add or remove the video under the cursor (immediate YouTube API call) |
+| <kbd>t</kbd> | Tidy the selected playlist: shows how many repeated videos it would remove and items it would move, then <kbd>y</kbd> applies it on YouTube (any other key cancels) |
 | <kbd>n</kbd> | Create a new playlist: type the title, <kbd>Tab</kbd> cycles privacy (public / unlisted / private), <kbd>Enter</kbd> creates, <kbd>Esc</kbd> cancels |
 | <kbd>c</kbd> | Copy the playlist's share link (`https://www.youtube.com/playlist?list=…`) to the clipboard; warns if the playlist is private |
 | <kbd>o</kbd> | Open the selected playlist in the browser |
@@ -350,7 +359,12 @@ talk_cut youtube playlist add "Algorithms Seminar 2026" dQw4w9WgXcQ
 
 # Remove a talk from a playlist:
 talk_cut youtube playlist remove "Algorithms Seminar 2026" recordings/2026-09-08/
+
+# Keep each video once and order the playlist newest first (by video publish date):
+talk_cut youtube playlist tidy "Algorithms Seminar 2026"
 ```
+
+**Tidy notes**: the copy of a repeated video that appears first is kept. Videos are ordered by the day they were published (UTC), newest first; videos published on the same day keep their current relative order, so a day of numbered talks stays in sequence. Private or deleted videos have no publish date and go last. If a move fails after duplicates were removed, the error says so; `--all` stops at the first playlist that fails. Reordering needs the playlist ordering set to *Manual* in YouTube Studio; otherwise tidy stops with a message saying so. Each delete or move is one API write (50 quota units of the default 10,000 per day), and tidy makes the fewest moves needed.
 
 **Multi-Playlist Support**: A talk can belong to multiple playlists. All assigned playlists are tracked in `talk_meta.json` under `"playlists": [{"id": "...", "title": "..."}]` and synchronized during upload, update, or when toggled in the TUI (<kbd>p</kbd>).
 
@@ -442,7 +456,8 @@ Running `talk_cut` generates the following files in the recording directory:
 Usage:
   talk_cut [options] <recording-directory> [announcement-url]
   talk_cut youtube update [options] <recording-directory>
-  talk_cut youtube playlist <list|create|set-default|add|remove> [options]
+  talk_cut youtube playlist <list|create|set-default|add|remove|tidy> [options]
+  talk_cut playlists [--channel <name>]  Edit playlists in the TUI without a recording
   talk_cut youtube setup [-H]            Interactive guided setup (-H for detailed guide)
   talk_cut youtube status                Inspect configured YouTube channels and tokens
   talk_cut auth [options] [secrets.json] Direct OAuth browser authorization

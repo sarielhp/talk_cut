@@ -47,6 +47,9 @@ type PlaylistsModel struct {
 	titleInput textinput.Model
 	privacyIdx int
 	creating   bool
+	tidyBusy   bool
+	tidyAsk    *youtube.Playlist
+	standalone bool
 	feedback   string
 	isError    bool
 	width      int
@@ -106,6 +109,7 @@ func (m *PlaylistsModel) reset(channel string) {
 	m.playlists, m.videos, m.members = nil, nil, nil
 	m.plIdx, m.vidIdx = 0, 0
 	m.loadingMem, m.creating = false, false
+	m.tidyBusy, m.tidyAsk = false, nil
 	m.pending = make(map[string]bool)
 	m.titleInput.Blur()
 }
@@ -355,6 +359,9 @@ func (m PlaylistsModel) View() string {
 		body = m.renderList()
 	}
 	header := RenderTabBar(int(ScreenPlaylists), m.width, m.theme)
+	if m.standalone {
+		header = m.theme.TitleStyle.Render(" talk_cut: playlist editor ")
+	}
 	footer := lipgloss.NewStyle().Width(m.width).MarginTop(1).Render(m.theme.HelpDesc.Render(" " + m.footerHint()))
 	return lipgloss.JoinVertical(lipgloss.Left, header, body, footer)
 }
@@ -362,11 +369,15 @@ func (m PlaylistsModel) View() string {
 func (m PlaylistsModel) footerHint() string {
 	switch m.mode {
 	case plModeVideos:
-		return "↑/↓: move | Space/Enter: toggle membership | c: copy link | o: open | r: refresh | Esc: playlists"
+		return "↑/↓: move | Space/Enter: toggle | t: tidy | c: copy link | o: open | r: refresh | Esc: playlists"
 	case plModeCreate:
 		return "Enter: create | Tab: cycle privacy | Esc: cancel"
 	}
-	return "↑/↓: move | Enter: open | n: new | c: copy link | o: open in browser | r: refresh | ←/→: tabs"
+	last := "←/→: tabs"
+	if m.standalone {
+		last = "q: quit"
+	}
+	return "↑/↓: move | Enter: open | n: new | t: tidy |c: copy link | o: open in browser | r: refresh | " + last
 }
 
 func (m PlaylistsModel) renderList() string {

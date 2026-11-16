@@ -3,12 +3,16 @@ package main
 import (
 	"context"
 	"fmt"
+	"net/http"
 	"os"
 	"strings"
 
 	"talk_cut/internal/config"
 	"talk_cut/internal/model"
+	"talk_cut/internal/ui"
 	"talk_cut/internal/youtube"
+
+	tea "github.com/charmbracelet/bubbletea"
 )
 
 // runPlaylistList queries and displays all playlists owned by the authenticated channel.
@@ -233,4 +237,92 @@ func resolveVideoIDFromTarget(target string) (videoID string, dir string) {
 	}
 	videoID = model.ExtractYouTubeID(target)
 	return videoID, ""
+}
+
+// runPlaylistTidyWith removes repeated videos from playlists and orders them newest first on YouTube.
+func runPlaylistTidyWith(targets []string, all, dryRun bool, channel string) error {
+	if len(targets) == 0 && !all {
+		return fmt.Errorf("name a playlist, or pass --all to tidy every playlist on the channel")
+	}
+	cfg, err := config.LoadConfig()
+	if err != nil {
+		return fmt.Errorf("loading config: %w", err)
+	}
+	chName := channel
+	if chName == "" {
+		chName = cfg.DefaultChannel
+	}
+	ctx := context.Background()
+	client, err := youtube.GetAuthenticatedClient(ctx, cfg, chName)
+	if err != nil {
+		return fmt.Errorf("authenticating for channel %q: %w", chName, err)
+	}
+	playlists, err := tidyTargets(ctx, client, targets, all)
+	if err != nil {
+		return err
+	}
+	for _, pl := range playlists {
+		if err := tidyOne(ctx, client, pl, dryRun); err != nil {
+			return fmt.Errorf("tidying playlist %q: %w", pl.Title, err)
+		}
+	}
+	return nil
+}
+
+func tidyTargets(ctx context.Context, client *http.Client, targets []string, all bool) ([]youtube.Playlist, error) {
+	if all {
+		return youtube.ListPlaylists(ctx, client)
+	}
+	var out []youtube.Playlist
+	for _, t := range targets {
+		pl, err := youtube.FindPlaylist(ctx, client, t)
+		if err != nil {
+			return nil, fmt.Errorf("finding playlist %q: %w", t, err)
+		}
+		out = append(out, *pl)
+	}
+	return out, nil
+}
+
+func tidyOne(ctx context.Context, client *http.Client, pl youtube.Playlist, dryRun bool) error {
+	fmt.Printf("=== %s [%s] ===\n", pl.Title, pl.ID)
+	report := func(line string) { fmt.Printf("  … %s\n", line) }
+	res, err := youtube.TidyPlaylist(ctx, client, pl.ID, dryRun, report)
+	if err != nil {
+		return err
+	}
+	if len(res.Duplicates) == 0 && len(res.Moves) == 0 {
+		fmt.Printf("  ✔ Already tidy (%d videos)\n", res.Items)
+		return nil
+	}
+	if !dryRun {
+		fmt.Printf("  ✔ Removed %d duplicate(s), moved %d item(s); %d videos, newest first\n",
+			len(res.Duplicates), len(res.Moves), len(res.Final))
+		return nil
+	}
+	fmt.Printf("  Would remove %d duplicate(s) and move %d item(s):\n", len(res.Duplicates), len(res.Moves))
+	for _, d := range res.Duplicates {
+		fmt.Printf("    - duplicate: %s\n", d.Title)
+	}
+	for i, it := range res.Final {
+		fmt.Printf("    %3d. %s  %s\n", i+1, dateOnly(it.VideoPublishedAt), it.Title)
+	}
+	return nil
+}
+
+func dateOnly(ts string) string {
+	if len(ts) < 10 {
+		return "----------"
+	}
+	return ts[:10]
+}
+
+// runPlaylistEditor opens the playlists panel on its own.
+func runPlaylistEditor(channel string) error {
+	cfg, err := config.LoadConfig()
+	if err != nil {
+		return fmt.Errorf("loading config: %w", err)
+	}
+	_, err = tea.NewProgram(ui.NewPlaylistEditor(cfg, channel), tea.WithAltScreen()).Run()
+	return err
 }

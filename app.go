@@ -67,6 +67,7 @@ func buildApp(opts *cliOptions) *clihelp.App {
 		Run: func(ctx *clihelp.Context) error { return runRoot(ctx, opts) },
 		Commands: []clihelp.Command{
 			transcribeCmd(),
+			playlistsEditorCmd(),
 			authCmd(),
 			youtubeCmd(),
 			clihelp.CompletionCommand(),
@@ -115,6 +116,23 @@ func runRoot(ctx *clihelp.Context, opts *cliOptions) error {
 	}
 
 	return executePipeline(opts)
+}
+
+func playlistsEditorCmd() clihelp.Command {
+	var channel string
+	return clihelp.Command{
+		Name:        "playlists",
+		Description: "Edit YouTube playlists in the TUI, without a recording.",
+		UsageLine:   "talk_cut playlists [options]",
+		Args:        clihelp.NoArgs,
+		Options: []clihelp.Option{
+			clihelp.String(&channel, "--channel <name>", "", "Target YouTube channel profile"),
+		},
+		Examples: []clihelp.Example{
+			{Line: "talk_cut playlists", Description: "Browse, populate and tidy the playlists of the default channel."},
+		},
+		Run: func(_ *clihelp.Context) error { return runPlaylistEditor(channel) },
+	}
 }
 
 func authCmd() clihelp.Command {
@@ -304,10 +322,12 @@ func playlistCmd() clihelp.Command {
 	var createTitle, createDesc, createPrivacy, createChannel string
 	var createDefault bool
 	var setChannel, addChannel, removeChannel string
+	var tidyChannel string
+	var tidyAll, tidyDryRun bool
 
 	return clihelp.Command{
 		Name:        "playlist",
-		Description: "List, create and populate YouTube playlists.",
+		Description: "List, create, populate and tidy YouTube playlists.",
 		UsageLine:   "talk_cut youtube playlist <subcommand> [options]",
 		Args:        clihelp.NoArgs,
 		Subcommands: []clihelp.Command{
@@ -391,6 +411,27 @@ func playlistCmd() clihelp.Command {
 				},
 				Run: func(ctx *clihelp.Context) error {
 					return runPlaylistRemoveWith(ctx.Args[0], ctx.Args[1], removeChannel)
+				},
+			},
+			{
+				Name: "tidy", Aliases: []string{"cleanup"},
+				Description: "Remove repeated videos from playlists and order them newest first, on YouTube.",
+				UsageLine:   "talk_cut youtube playlist tidy [options] <playlist>...",
+				Parameters: []clihelp.Param{
+					{Name: "<playlist>", Description: "A playlist, by identifier or by title; omit with --all."},
+				},
+				Args: clihelp.MinimumNArgs(0),
+				Options: []clihelp.Option{
+					clihelp.Bool(&tidyAll, "--all", false, "Tidy every playlist on the channel"),
+					clihelp.Bool(&tidyDryRun, "--dry-run", false, "Show what would change without touching YouTube"),
+					clihelp.String(&tidyChannel, "--channel <name>", "", "Target YouTube channel profile"),
+				},
+				Examples: []clihelp.Example{
+					{Line: "talk_cut youtube playlist tidy --dry-run Seminars", Description: "Preview the cleanup of one playlist."},
+					{Line: "talk_cut youtube playlist tidy --all", Description: "Tidy every playlist."},
+				},
+				Run: func(ctx *clihelp.Context) error {
+					return runPlaylistTidyWith(ctx.Args, tidyAll, tidyDryRun, tidyChannel)
 				},
 			},
 		},

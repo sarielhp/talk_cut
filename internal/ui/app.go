@@ -202,17 +202,8 @@ func (a AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return a.handleYTVideoAddedToPlaylistMsg(msg)
 	case ytVideoRemovedFromPlaylistMsg:
 		return a.handleYTVideoRemovedFromPlaylistMsg(msg)
-	case plPanelLoadedMsg:
-		a.playlistsView.SetLoaded(msg.channel, msg.playlists, msg.videos, msg.err)
-		return a, nil
-	case plMembersLoadedMsg:
-		a.playlistsView.SetMembers(msg.seq, msg.playlistID, msg.ids, msg.err)
-		return a, nil
-	case plCreatedMsg:
-		a.playlistsView.ApplyCreated(msg.channel, msg.playlist, msg.err)
-		return a, nil
-	case plCopiedMsg:
-		a.playlistsView.SetCopied(msg.playlist, playlistURL(msg.playlist.ID), msg.err)
+	case plPanelLoadedMsg, plMembersLoadedMsg, plCreatedMsg, plCopiedMsg, plTidyMsg:
+		applyPlaylistPanelMsg(&a.playlistsView, msg)
 		return a, nil
 	case plToggledMsg:
 		return a.handlePlaylistToggled(msg)
