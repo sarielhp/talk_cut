@@ -3,6 +3,7 @@ package ui
 
 import (
 	"strings"
+	"talk_cut/internal/readonly"
 
 	"github.com/charmbracelet/lipgloss"
 )
@@ -179,7 +180,8 @@ func RenderTabBar(activeTab, width int, theme Theme) string {
 		"[5] YouTube",
 		"[6] Playlists",
 	}
-	if width < 104 {
+	tag := len([]rune(readonlyTag()))
+	if width < 104+tag {
 		tabs = []string{
 			"[1] Cuts",
 			"[2] Meta",
@@ -199,10 +201,21 @@ func RenderTabBar(activeTab, width int, theme Theme) string {
 		}
 	}
 
-	appTitle := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("#FFFFFF")).Render(" talk_cut: ")
-	if width < 88 {
+	appTitle := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("#FFFFFF")).Render(" talk_cut" + readonlyTag() + ": ")
+	if width < 88+tag {
 		appTitle = "" // six short tabs alone are 75 columns; the title would wrap the bar at 80
+		if readonly.Enabled() {
+			appTitle = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("#F87171")).Render("RO")
+		}
 	}
 	tabBar := appTitle + strings.Join(parts, " ")
 	return lipgloss.NewStyle().Width(width).Background(lipgloss.Color("#1E293B")).Render(tabBar)
+}
+
+// readonlyTag marks the title while the read-only lock is on.
+func readonlyTag() string {
+	if readonly.Enabled() {
+		return readonly.Tag
+	}
+	return ""
 }

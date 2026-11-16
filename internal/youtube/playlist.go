@@ -12,6 +12,7 @@ import (
 	"net/url"
 	"strings"
 	"talk_cut/internal/ctxsleep"
+	"talk_cut/internal/readonly"
 	"time"
 )
 
@@ -85,6 +86,9 @@ func ListPlaylists(ctx context.Context, client *http.Client) ([]Playlist, error)
 
 // CreatePlaylist creates a new YouTube playlist for the authenticated user.
 func CreatePlaylist(ctx context.Context, client *http.Client, title, description, privacy string) (*Playlist, error) {
+	if roErr := readonly.Check("CreatePlaylist"); roErr != nil {
+		return nil, roErr
+	}
 	title = strings.TrimSpace(title)
 	if title == "" {
 		return nil, fmt.Errorf("playlist title cannot be empty")
@@ -162,6 +166,9 @@ var errPlaylistNotFound = errors.New("playlist not found")
 
 // AddVideoToPlaylist inserts a video into a YouTube playlist, retrying while a new playlist propagates.
 func AddVideoToPlaylist(ctx context.Context, client *http.Client, playlistID, videoID string) error {
+	if roErr := readonly.Check("AddVideoToPlaylist"); roErr != nil {
+		return roErr
+	}
 	playlistID = strings.TrimSpace(playlistID)
 	videoID = strings.TrimSpace(videoID)
 	if playlistID == "" {
@@ -184,6 +191,9 @@ func AddVideoToPlaylist(ctx context.Context, client *http.Client, playlistID, vi
 
 // insertPlaylistItem makes one insert call and reports whether a failure is worth retrying.
 func insertPlaylistItem(ctx context.Context, client *http.Client, playlistID, videoID string) (bool, error) {
+	if roErr := readonly.Check("insertPlaylistItem"); roErr != nil {
+		return false, roErr
+	}
 	payload := map[string]any{
 		"snippet": map[string]any{
 			"playlistId": playlistID,
@@ -262,6 +272,9 @@ func FindPlaylist(ctx context.Context, client *http.Client, idOrTitle string) (*
 // A video that is not in the playlist is not an error; any failed lookup or deletion is.
 // An empty or playlistNotFound lookup is retried briefly, since YouTube lags just-made writes.
 func RemoveVideoFromPlaylist(ctx context.Context, client *http.Client, playlistID, videoID string) error {
+	if roErr := readonly.Check("RemoveVideoFromPlaylist"); roErr != nil {
+		return roErr
+	}
 	playlistID = strings.TrimSpace(playlistID)
 	videoID = strings.TrimSpace(videoID)
 	if playlistID == "" {
@@ -337,6 +350,9 @@ func findPlaylistItemIDs(ctx context.Context, client *http.Client, playlistID, v
 
 // deletePlaylistItem deletes one playlist item; an item that is already gone counts as deleted.
 func deletePlaylistItem(ctx context.Context, client *http.Client, itemID string) error {
+	if roErr := readonly.Check("deletePlaylistItem"); roErr != nil {
+		return roErr
+	}
 	delURL := playlistItemsRemoveEndpoint + "?id=" + url.QueryEscape(itemID)
 	req, err := http.NewRequestWithContext(ctx, http.MethodDelete, delURL, nil)
 	if err != nil {

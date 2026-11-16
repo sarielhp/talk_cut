@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"talk_cut/internal/readonly"
 
 	tea "github.com/charmbracelet/bubbletea"
 
@@ -50,6 +51,9 @@ type cliOptions struct {
 }
 
 func main() {
+	if readonly.Enabled() {
+		fmt.Fprintln(os.Stderr, readonly.Banner)
+	}
 	if err := run(os.Args[1:]); err != nil {
 		fmt.Fprintf(os.Stderr, "error: %v\n", err)
 		os.Exit(1)

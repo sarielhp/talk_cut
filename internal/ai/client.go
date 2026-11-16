@@ -9,6 +9,7 @@ import (
 	"io"
 	"net/http"
 	"strings"
+	"talk_cut/internal/readonly"
 	"time"
 
 	"talk_cut/internal/config"
@@ -40,7 +41,7 @@ func NewClient(cfg config.Config) (*Client, error) {
 	}
 
 	return &Client{
-		httpClient: &http.Client{Timeout: 60 * time.Second},
+		httpClient: readonly.Guard(&http.Client{Timeout: 60 * time.Second}),
 		baseURL:    baseURL,
 		apiKey:     key,
 		model:      model,

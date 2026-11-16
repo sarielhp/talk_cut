@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"talk_cut/internal/readonly"
 
 	"talk_cut/internal/config"
 )
@@ -133,6 +134,10 @@ func handleCopySecrets(reader *bufio.Reader, out io.Writer, src, dst string) {
 		return
 	}
 
+	if err := readonly.Check("copying client secrets"); err != nil {
+		fmt.Fprintf(out, "warning: %v\n", err)
+		return
+	}
 	if err := os.WriteFile(dst, data, 0600); err != nil {
 		fmt.Fprintf(out, "warning: writing %s: %v\n", dst, err)
 		return

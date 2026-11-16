@@ -1,0 +1,101 @@
+#!/usr/bin/env ruby
+# frozen_string_literal: true
+
+# Usage: tools/live_test [options]
+#
+# The full live test of talk_cut, run by hand (not part of the gate; it is slow and
+# talks to YouTube). Everything runs under the hard read-only lock
+# (TALK_CUT_READ_ONLY=1): YouTube, AI and Whisper clients send only GET/HEAD, and the
+# YouTube, config and token write functions refuse. Programs talk_cut would launch
+# (browser opener, video players, clipboard) are stubs that only log their arguments.
+#
+# Preflight (any failure stops the run before a key is sent):
+#   build into the run directory, run the Go lock tests, check the binary's READ-ONLY
+#   banner and that every launched program resolves to a stub, and snapshot the
+#   channel's playlists, what a tidy would change, and the user's config/token files.
+# Suites:
+#   cli       help pages, pipeline --dry-run on a synthetic recording, youtube status,
+#             and refused writes (set-default, tidy).
+#   tui       tools/live_tui_test.rb (tabs 1-4) under the lock; render, YouTube and
+#             Playlists tabs of the recording TUI, with refused upload.
+#   editor    talk_cut playlists: navigation, open/copy (stubs), refused membership
+#             change, create and tidy, the tidy confirmation flow, reload, quit.
+#   stress    seeded random keys, text and resizes on the recording TUI and the editor.
+# Postflight: the snapshot must be unchanged.
+#
+# Options:
+#   --only a,b    Run only these suites (cli, tui, editor, stress)
+#   --steps N     Random actions per stress target (default 400)
+#   --seed N      Seed for the stress test (default: random, printed)
+#   --keep        Keep the run directory even when everything passes
+
+require 'optparse'
+require 'fileutils'
+require_relative 'tmp_space'
+require_relative 'live/context'
+require_relative 'live/preflight'
+require_relative 'live/cli_suite'
+require_relative 'live/tui_suite'
+require_relative 'live/stress_suite'
+
+ProjectTmp.project = 'talk_cut'
+SUITES = %w[cli tui editor stress].freeze
+
+def parse_options
+  opts = { only: SUITES, steps: 400, seed: Random.new_seed % 1_000_000, keep: false }
+  OptionParser.new do |o|
+    o.banner = 'Usage: tools/live_test [--only cli,tui,editor,stress] [--steps N] [--seed N] [--keep]'
+    o.on('--only LIST', Array) { |v| opts[:only] = v }
+    o.on('--steps N', Integer) { |v| opts[:steps] = v }
+    o.on('--seed N', Integer) { |v| opts[:seed] = v }
+    o.on('--keep') { opts[:keep] = true }
+  end.parse!
+  unknown = opts[:only] - SUITES
+  abort "unknown suite(s): #{unknown.join(', ')}" unless unknown.empty?
+  opts
+end
+
+def run_suites(ctx, opts)
+  Live::CLISuite.run(ctx) if opts[:only].include?('cli')
+  Live::TUISuite.run_recording(ctx) if opts[:only].include?('tui')
+  Live::TUISuite.run_editor(ctx) if opts[:only].include?('editor')
+  return unless opts[:only].include?('stress')
+
+  Live::Stress.new(ctx, name: 'recording', argv: [ctx.bin, '--no-ai', ctx.fixture('stress')],
+                        steps: opts[:steps], seed: opts[:seed]).run
+  return ctx.report.note('editor stress skipped: YouTube unavailable') unless ctx.youtube
+
+  Live::Stress.new(ctx, name: 'editor', argv: [ctx.bin, 'playlists'], steps: opts[:steps], seed: opts[:seed] + 1).run
+end
+
+def postflight(ctx)
+  ctx.report.section('Postflight: nothing changed')
+  after = Live::Preflight.capture_state(ctx)
+  ctx.before.each do |key, value|
+    ctx.report.check(after[key] == value, "#{key} unchanged", key == :files ? nil : "before:\n#{value}\nafter:\n#{after[key]}")
+  end
+end
+
+opts = parse_options
+root = File.expand_path('..', __dir__)
+run_dir = ProjectTmp.mktmpdir('live-test')
+report = Live::Report.new
+ctx = Live::Context.new(root: root, run_dir: run_dir, report: report)
+puts "talk_cut live test — run directory #{run_dir}, seed #{opts[:seed]}"
+ok = false
+begin
+  Live::Preflight.run(ctx)
+  run_suites(ctx, opts)
+  postflight(ctx)
+  ok = report.summary
+rescue Live::Fatal => e
+  puts "\n\e[1;31mSTOPPED: #{e.message}\e[0m"
+ensure
+  system('tmux', '-L', ctx.socket, 'kill-server', err: File::NULL)
+end
+if ok && !opts[:keep]
+  FileUtils.rm_rf(run_dir)
+else
+  puts "run directory kept: #{run_dir}"
+end
+exit(ok ? 0 : 1)

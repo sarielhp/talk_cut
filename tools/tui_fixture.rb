@@ -68,7 +68,7 @@ module TUIFixture
 
   def meta
     {
-      'title' => 'Oriented Spanners in Metric Spaces',
+      'title' => 'Synthetic Talk for the talk_cut Live Test',
       'speaker' => SPEAKER,
       'abstract' => 'A synthetic talk used by the live TUI test.',
       'privacy' => 'unlisted',

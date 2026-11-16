@@ -11,6 +11,7 @@ import (
 	"net/url"
 	"slices"
 	"strings"
+	"talk_cut/internal/readonly"
 	"time"
 
 	"talk_cut/internal/ctxsleep"
@@ -237,6 +238,11 @@ func PlanTidy(items []PlaylistItem) TidyPlan {
 // TidyPlaylist removes repeated videos from a playlist and orders it newest first on YouTube.
 // With dryRun it only reports the plan. report, if not nil, receives progress lines.
 func TidyPlaylist(ctx context.Context, client *http.Client, playlistID string, dryRun bool, report func(string)) (TidyResult, error) {
+	if !dryRun {
+		if roErr := readonly.Check("TidyPlaylist"); roErr != nil {
+			return TidyResult{}, roErr
+		}
+	}
 	if report == nil {
 		report = func(string) {}
 	}
@@ -305,6 +311,9 @@ func applyMoves(ctx context.Context, client *http.Client, playlistID string, mov
 
 // movePlaylistItem sets one item's position with playlistItems.update.
 func movePlaylistItem(ctx context.Context, client *http.Client, playlistID string, m PlaylistMove) error {
+	if roErr := readonly.Check("movePlaylistItem"); roErr != nil {
+		return roErr
+	}
 	payload := map[string]any{
 		"id": m.Item.ItemID,
 		"snippet": map[string]any{

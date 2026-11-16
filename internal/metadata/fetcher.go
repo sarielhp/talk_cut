@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/http"
 	"strings"
+	"talk_cut/internal/readonly"
 	"time"
 
 	"golang.org/x/net/html"
@@ -40,7 +41,7 @@ func fetchPage(ctx context.Context, pageURL, userAgent string) (io.ReadCloser, e
 	}
 	req.Header.Set("User-Agent", userAgent)
 
-	client := &http.Client{Timeout: 15 * time.Second}
+	client := readonly.Guard(&http.Client{Timeout: 15 * time.Second})
 	resp, err := client.Do(req)
 	if err != nil {
 		return nil, fmt.Errorf("fetching %q: %w", pageURL, err)

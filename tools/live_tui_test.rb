@@ -5,6 +5,7 @@ require 'open3'
 require 'fileutils'
 require 'optparse'
 require 'json'
+require 'shellwords'
 require_relative 'tmp_space'
 require_relative 'tui_fixture'
 
@@ -106,6 +107,7 @@ class TUISnapshotTester
     log_step('Launch talk_cut in headless session (PTY)')
     launch_app!
     snap = wait_for_pattern('TRANSCRIPT', 'initial render of transcript pane', timeout: 4.0)
+    assert_contains(snap, '[READ-ONLY]', 'Read-only marker shown before any key') if ENV['TALK_CUT_READ_ONLY']
     capture_snapshot('01_initial_cuts_view', snap)
 
     assert_contains(snap, 'TRANSCRIPT (540 cues)', 'Transcript header with cue count')
@@ -228,7 +230,7 @@ class TUISnapshotTester
     send_key('Left')
     send_key('Left')
     snap = read_pane
-    assert_contains(snap, '[2] Metadata', 'Regular Left arrow moved cursor without switching tabs')
+    assert_contains(snap, '[2] Meta', 'Regular Left arrow moved cursor without switching tabs')
 
     # Insert letter at cursor
     send_key('-l "X"')
@@ -238,7 +240,7 @@ class TUISnapshotTester
     send_key('Right')
     send_key('Right')
     snap = read_pane
-    assert_contains(snap, '[2] Metadata', 'Regular Right arrow moved cursor without switching tabs')
+    assert_contains(snap, '[2] Meta', 'Regular Right arrow moved cursor without switching tabs')
 
     # Verify modified text in URL field contains edited characters
     assert_contains(snap, 'aXbc', 'URL field contains inserted letters with left/right cursor navigation')
@@ -377,7 +379,7 @@ class TUISnapshotTester
 
       abort "\e[31mError: #{tool} is required for the headless TUI test.\e[0m"
     end
-    binary = File.expand_path('../talk_cut', __dir__)
+    binary = self.binary
     return if File.exist?(binary)
 
     puts 'Building talk_cut binary first...'
@@ -390,16 +392,36 @@ class TUISnapshotTester
   end
 
   def launch_app!
-    binary = File.expand_path('../talk_cut', __dir__)
-    cmd = "tmux new-session -d -s #{@session_name} -x #{@cols} -y #{@rows} '#{binary} --no-ai #{@tmp_dir}'"
+    binary = self.binary
+    cmd = "#{tmux} new-session -d -s #{@session_name} -x #{@cols} -y #{@rows} " \
+          "#{Shellwords.escape("#{env_prefix}#{binary} --no-ai #{@tmp_dir}")}"
     _, stderr, status = Open3.capture3(cmd)
     return if status.success?
 
     abort "\e[31mFailed to launch tmux session:\e[0m #{stderr}"
   end
 
+  # tools/live_test runs this script under its read-only environment and on its own tmux server.
+  PASSED_ENV = %w[TALK_CUT_READ_ONLY PATH TALK_CUT_LIVE_STUB_LOG TMPDIR].freeze
+
+  def tmux
+    socket = ENV.fetch('TALK_CUT_TMUX_SOCKET', '')
+    socket.empty? ? 'tmux' : "tmux -L #{socket}"
+  end
+
+  def binary
+    ENV.fetch('TALK_CUT_BINARY', File.expand_path('../talk_cut', __dir__))
+  end
+
+  # The program's environment goes on its command line: an already running tmux server
+  # would otherwise give the session the server's environment instead of ours.
+  def env_prefix
+    vars = PASSED_ENV.filter_map { |k| ENV[k] && "#{k}=#{Shellwords.escape(ENV[k])}" }
+    vars.empty? ? '' : "env -u TALK_CUT_PLAYER #{vars.join(' ')} "
+  end
+
   def send_key(key)
-    cmd = "tmux send-keys -t #{@session_name} #{key}"
+    cmd = "#{tmux} send-keys -t #{@session_name} #{key}"
     _, stderr, status = Open3.capture3(cmd)
     return if status.success?
 
@@ -407,13 +429,13 @@ class TUISnapshotTester
   end
 
   def read_pane
-    cmd = "tmux capture-pane -t #{@session_name} -p"
+    cmd = "#{tmux} capture-pane -t #{@session_name} -p"
     stdout, _, status = Open3.capture3(cmd)
     status.success? ? stdout : ''
   end
 
   def read_pane_ansi
-    cmd = "tmux capture-pane -t #{@session_name} -p -e"
+    cmd = "#{tmux} capture-pane -t #{@session_name} -p -e"
     stdout, _, status = Open3.capture3(cmd)
     status.success? ? stdout : ''
   end
@@ -609,11 +631,11 @@ class TUISnapshotTester
   end
 
   def resize_window(cols, rows)
-    Open3.capture3('tmux', 'resize-window', '-t', @session_name, '-x', cols.to_s, '-y', rows.to_s)
+    Open3.capture3(*tmux.split, 'resize-window', '-t', @session_name, '-x', cols.to_s, '-y', rows.to_s)
   end
 
   def session_alive?
-    _, _, status = Open3.capture3("tmux has-session -t #{@session_name} 2>&1")
+    _, _, status = Open3.capture3("#{tmux} has-session -t #{@session_name} 2>&1")
     status.success?
   end
 
@@ -632,7 +654,7 @@ class TUISnapshotTester
   end
 
   def teardown!
-    Open3.capture3("tmux kill-session -t #{@session_name} 2>&1") if @session_name
+    Open3.capture3("#{tmux} kill-session -t #{@session_name} 2>&1") if @session_name
     FileUtils.remove_entry(@tmp_dir) if @tmp_dir && File.exist?(@tmp_dir)
   end
 end

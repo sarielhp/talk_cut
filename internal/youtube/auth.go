@@ -10,6 +10,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"talk_cut/internal/readonly"
 	"time"
 
 	"golang.org/x/oauth2"
@@ -35,6 +36,9 @@ type ClientCredentials struct {
 
 // Authorize performs the interactive browser OAuth2 loopback authentication flow.
 func Authorize(ctx context.Context, cfg config.Config, channel, customSecrets, customToken string) error {
+	if roErr := readonly.Check("Authorize"); roErr != nil {
+		return roErr
+	}
 	secPath := cfg.YouTubeSecrets
 	if customSecrets != "" {
 		secPath = customSecrets
@@ -192,6 +196,9 @@ func openBrowser(url string) error {
 
 // SaveToken persists an OAuth2 token to disk with restricted permissions (0600).
 func SaveToken(path string, token *oauth2.Token) error {
+	if roErr := readonly.Check("SaveToken"); roErr != nil {
+		return roErr
+	}
 	resolved, err := config.ResolvePath(path)
 	if err != nil {
 		return err
@@ -258,5 +265,5 @@ func GetAuthenticatedClient(ctx context.Context, cfg config.Config, channel stri
 		Scopes:       []string{youtubeUploadScope, youtubeForceScope},
 	}
 
-	return conf.Client(ctx, token), nil
+	return readonly.Guard(conf.Client(ctx, token)), nil
 }

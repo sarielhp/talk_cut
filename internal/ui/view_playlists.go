@@ -360,7 +360,7 @@ func (m PlaylistsModel) View() string {
 	}
 	header := RenderTabBar(int(ScreenPlaylists), m.width, m.theme)
 	if m.standalone {
-		header = m.theme.TitleStyle.Render(" talk_cut: playlist editor ")
+		header = m.theme.TitleStyle.Render(" talk_cut: playlist editor" + readonlyTag() + " ")
 	}
 	footer := lipgloss.NewStyle().Width(m.width).MarginTop(1).Render(m.theme.HelpDesc.Render(" " + m.footerHint()))
 	return lipgloss.JoinVertical(lipgloss.Left, header, body, footer)

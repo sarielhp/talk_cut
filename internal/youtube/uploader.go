@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"os"
 	"strings"
+	"talk_cut/internal/readonly"
 	"time"
 
 	"talk_cut/internal/model"
@@ -71,6 +72,9 @@ func (cr *countingReader) Read(p []byte) (int, error) {
 
 // UploadVideo executes a resumable chunked upload of the video file to YouTube.
 func UploadVideo(ctx context.Context, client *http.Client, opts UploadOptions) (*UploadResult, error) {
+	if roErr := readonly.Check("UploadVideo"); roErr != nil {
+		return nil, roErr
+	}
 	stat, err := os.Stat(opts.VideoPath)
 	if err != nil {
 		return nil, fmt.Errorf("stat video file %q: %w", opts.VideoPath, err)
@@ -195,6 +199,9 @@ func uploadVideoPayload(
 
 // UploadCaption inserts a WebVTT caption track into an existing YouTube video.
 func UploadCaption(ctx context.Context, client *http.Client, videoID, vttPath, language, trackName string) error {
+	if roErr := readonly.Check("UploadCaption"); roErr != nil {
+		return roErr
+	}
 	vttData, err := os.ReadFile(vttPath)
 	if err != nil {
 		return fmt.Errorf("reading caption file %q: %w", vttPath, err)
@@ -260,6 +267,9 @@ func performMultipartCaptionUpload(ctx context.Context, client *http.Client, met
 
 // UpdateVideoMetadata updates the title, description, tags, and privacy of an existing YouTube video.
 func UpdateVideoMetadata(ctx context.Context, client *http.Client, videoID string, meta model.TalkMetadata) (*VideoVerification, error) {
+	if roErr := readonly.Check("UpdateVideoMetadata"); roErr != nil {
+		return nil, roErr
+	}
 	if videoID == "" {
 		return nil, fmt.Errorf("video ID cannot be empty")
 	}

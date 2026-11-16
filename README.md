@@ -432,6 +432,7 @@ container has resumed.
 | `TALK_CUT_YOUTUBE_SECRETS` | Override path to Google client secrets JSON |
 | `TALK_CUT_YOUTUBE_TOKEN` | Override path to OAuth token file |
 | `TALK_CUT_DEFAULT_PLAYLIST` | Override default YouTube playlist ID |
+| `TALK_CUT_READ_ONLY` | `1` turns on the hard read-only lock (see "Read-Only Mode and the Live Test") |
 
 ---
 
@@ -449,6 +450,32 @@ Running `talk_cut` generates the following files in the recording directory:
 | `talk_meta.json` | Talk metadata cache (title, speaker, abstract, tags, URL, YouTube ID, short URL, playlists) |
 
 ---
+
+## Read-Only Mode and the Live Test
+
+Set `TALK_CUT_READ_ONLY=1` to run talk_cut under a hard read-only lock. The lock is read once at start-up and cannot be turned off from inside the program. While it is on:
+
+- YouTube, AI (OpenRouter) and Whisper clients send only `GET`/`HEAD`; every other request fails with a read-only error before it leaves the process.
+- Every YouTube write function (upload, captions, details update, playlist create/add/remove/tidy), `talk_cut auth`, token saving and config saving refuse at the API level, whatever client they are given.
+- talk_cut prints a banner on stderr and shows `[READ-ONLY]` in the TUI title (`RO` in terminals narrower than about 100 columns).
+- Files of the recording being edited (cuts, metadata, renders) are still written.
+
+`tools/live_test` (or `make live-test`) is the full live test. It is slow, talks to YouTube, and is not part of the gate. It runs everything under the lock, with the browser opener, video players and clipboard tools replaced by stubs that only log their arguments. Before sending any key it builds talk_cut, runs the Go lock tests, checks the banner and the stubs, and snapshots the channel's playlists, what a tidy would change, and your config and token files; the snapshot must be unchanged at the end. The suites are:
+
+| Suite | Covers |
+|---|---|
+| `cli` | help pages, `--dry-run` on a synthetic recording, `youtube status`, refused writes (`set-default`, `tidy`) |
+| `tui` | `tools/live_tui_test.rb` (tabs 1–4), then render, YouTube (refused upload) and Playlists tabs |
+| `editor` | `talk_cut playlists`: navigation, open/copy link, refused membership change and create, the tidy confirmation flow, reload, quit |
+| `stress` | seeded random keys, Unicode text bursts and window resizes on the recording TUI and the editor; a crash, panic, blank screen, or no exit on Ctrl+C at the end fails |
+
+```bash
+tools/live_test                          # everything (about 1–2 minutes)
+tools/live_test --only editor,stress     # some suites
+tools/live_test --steps 2000 --seed 7    # a longer, reproducible stress run
+```
+
+The recording is synthetic (`tools/tui_fixture.rb`), so no real recording is needed. A failed run keeps its directory (action logs, stub log, stderr) and prints its path.
 
 ## CLI Options Reference
 

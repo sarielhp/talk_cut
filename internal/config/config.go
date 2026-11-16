@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"talk_cut/internal/readonly"
 )
 
 // Config stores runtime configuration parameters without embedding raw secret tokens.
@@ -121,6 +122,9 @@ func loadFromTalkCutConfig(cfg *Config, home string) {
 
 // SaveConfig writes the given configuration back to ~/.config/talk_cut/config.json.
 func SaveConfig(cfg Config) error {
+	if roErr := readonly.Check("SaveConfig"); roErr != nil {
+		return roErr
+	}
 	home, err := os.UserHomeDir()
 	if err != nil {
 		return fmt.Errorf("resolving user home dir: %w", err)
@@ -275,6 +279,9 @@ func ResolvePath(p string) (string, error) {
 
 // SaveConfig persists the current configuration to ~/.config/talk_cut/config.json.
 func (c Config) SaveConfig() error {
+	if roErr := readonly.Check("SaveConfig"); roErr != nil {
+		return roErr
+	}
 	home, homeErr := os.UserHomeDir()
 	if homeErr != nil {
 		return fmt.Errorf("locating home directory: %w", homeErr)

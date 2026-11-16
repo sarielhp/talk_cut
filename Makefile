@@ -42,6 +42,11 @@ test-tui: build
 test-scroll: build
 	ruby tools/live_tui_test.rb --scroll-only
 
+# Full live test, read-only (hard lock): CLI, TUI tasks, playlist editor, random stress.
+# Slow and talks to YouTube; not part of the gate. ARGS, e.g. ARGS="--steps 1000 --seed 7".
+live-test:
+	tools/live_test $(ARGS)
+
 # Docker-based Charm VHS snapshot testing
 test-vhs: build
 	docker run --rm -v "$$(pwd):/vhs" ghcr.io/charmbracelet/vhs tools/test_tui.tape

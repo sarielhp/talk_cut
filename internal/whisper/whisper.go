@@ -15,6 +15,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"talk_cut/internal/readonly"
 	"time"
 
 	"talk_cut/internal/ctxsleep"
@@ -71,7 +72,7 @@ func NewClient(opt Options) (*Client, error) {
 		healthURL:      healthEndpoint(base),
 		language:       language,
 		prompt:         strings.TrimSpace(opt.Prompt),
-		http:           &http.Client{Timeout: requestTimeout},
+		http:           readonly.Guard(&http.Client{Timeout: requestTimeout}),
 		healthInterval: defaultHealthInterval,
 		readyTimeout:   readyTimeout,
 	}, nil
