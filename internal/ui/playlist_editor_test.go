@@ -41,7 +41,7 @@ func TestPlaylistEditorTidyConfirmFlow(t *testing.T) {
 	if cmd == nil {
 		t.Fatal("t did not start a tidy plan")
 	}
-	if _, cmd := e.Update(runeKey("t")); cmd != nil {
+	if _, again := e.Update(runeKey("t")); again != nil {
 		t.Error("a second t started another plan while one was in flight")
 	}
 
