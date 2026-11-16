@@ -84,6 +84,7 @@ func TestAddVideoToPlaylist(t *testing.T) {
 	defer ts.Close()
 
 	override(t, &playlistItemsInsertEndpoint, ts.URL)
+	lookupServer(t, http.StatusOK, `{"items":[]}`)
 
 	// Standard add
 	if err := AddVideoToPlaylist(context.Background(), ts.Client(), "PL123", "vid999"); err != nil {
@@ -229,6 +230,7 @@ func TestAddVideoToPlaylistRetriesWhileNewPlaylistPropagates(t *testing.T) {
 			}))
 			defer ts.Close()
 			override(t, &playlistItemsInsertEndpoint, ts.URL)
+			lookupServer(t, http.StatusOK, `{"items":[]}`)
 
 			err := AddVideoToPlaylist(context.Background(), ts.Client(), "PL1", "v1")
 			if (err != nil) != tc.wantErr || hits != tc.wantHits {
@@ -292,5 +294,55 @@ func TestRemoveVideoFromPlaylistWaitsForNewPlaylist(t *testing.T) {
 	}
 	if !deleted {
 		t.Fatal("expected the item to be deleted once the playlist became visible")
+	}
+}
+
+// lookupServer answers the membership lookup (playlistItems.list by videoId) with status and body.
+func lookupServer(t *testing.T, status int, body string) *int {
+	t.Helper()
+	calls := 0
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet || r.URL.Query().Get("videoId") == "" {
+			http.Error(w, "expected a GET lookup by videoId", http.StatusMethodNotAllowed)
+			return
+		}
+		calls++
+		w.WriteHeader(status)
+		fmt.Fprint(w, body)
+	}))
+	t.Cleanup(ts.Close)
+	override(t, &playlistItemsRemoveEndpoint, ts.URL)
+	return &calls
+}
+
+func TestAddVideoToPlaylistSkipsVideoAlreadyThere(t *testing.T) {
+	for _, tc := range []struct {
+		name        string
+		status      int
+		body        string
+		wantInserts int
+		wantErr     bool
+	}{
+		{"already in the playlist: no insert", http.StatusOK, `{"items":[{"id":"item1"}]}`, 0, false},
+		{"not in the playlist: one insert", http.StatusOK, `{"items":[]}`, 1, false},
+		{"playlist not listed yet: insert anyway", http.StatusNotFound, `{"reason":"playlistNotFound"}`, 1, false},
+		{"lookup fails: no insert, error", http.StatusInternalServerError, `{}`, 0, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			inserts := 0
+			ins := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				inserts++
+				fmt.Fprint(w, `{"id":"new"}`)
+			}))
+			defer ins.Close()
+			override(t, &playlistItemsInsertEndpoint, ins.URL)
+			lookups := lookupServer(t, tc.status, tc.body)
+
+			err := AddVideoToPlaylist(context.Background(), ins.Client(), "PL1", "v1")
+			if (err != nil) != tc.wantErr || inserts != tc.wantInserts || *lookups != 1 {
+				t.Fatalf("err=%v inserts=%d lookups=%d; want err=%v inserts=%d lookups=1",
+					err, inserts, *lookups, tc.wantErr, tc.wantInserts)
+			}
+		})
 	}
 }

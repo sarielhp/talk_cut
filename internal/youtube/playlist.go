@@ -164,7 +164,9 @@ const propagationRetries = 4
 // errPlaylistNotFound marks a lookup that YouTube rejected as playlistNotFound, which a just-created playlist briefly is.
 var errPlaylistNotFound = errors.New("playlist not found")
 
-// AddVideoToPlaylist inserts a video into a YouTube playlist, retrying while a new playlist propagates.
+// AddVideoToPlaylist inserts a video into a YouTube playlist unless it is already there,
+// retrying while a new playlist propagates. YouTube itself accepts the same video twice,
+// so the membership lookup is what keeps a playlist free of repeats.
 func AddVideoToPlaylist(ctx context.Context, client *http.Client, playlistID, videoID string) error {
 	if roErr := readonly.Check("AddVideoToPlaylist"); roErr != nil {
 		return roErr
@@ -178,6 +180,10 @@ func AddVideoToPlaylist(ctx context.Context, client *http.Client, playlistID, vi
 		return fmt.Errorf("video ID cannot be empty")
 	}
 
+	present, err := videoInPlaylist(ctx, client, playlistID, videoID)
+	if err != nil || present {
+		return err
+	}
 	for attempt := 0; ; attempt++ {
 		retryable, err := insertPlaylistItem(ctx, client, playlistID, videoID)
 		if err == nil || !retryable || attempt == propagationRetries {
@@ -187,6 +193,20 @@ func AddVideoToPlaylist(ctx context.Context, client *http.Client, playlistID, vi
 			return err
 		}
 	}
+}
+
+// videoInPlaylist reports whether a playlist already contains a video. A playlist that
+// YouTube does not list yet (just created) holds nothing; any other failed lookup is an
+// error, so an add never proceeds on a guess.
+func videoInPlaylist(ctx context.Context, client *http.Client, playlistID, videoID string) (bool, error) {
+	ids, err := findPlaylistItemIDs(ctx, client, playlistID, videoID)
+	if errors.Is(err, errPlaylistNotFound) {
+		return false, nil
+	}
+	if err != nil {
+		return false, fmt.Errorf("checking whether the playlist already has the video: %w", err)
+	}
+	return len(ids) > 0, nil
 }
 
 // insertPlaylistItem makes one insert call and reports whether a failure is worth retrying.

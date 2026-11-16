@@ -364,6 +364,8 @@ talk_cut youtube playlist remove "Algorithms Seminar 2026" recordings/2026-09-08
 talk_cut youtube playlist tidy "Algorithms Seminar 2026"
 ```
 
+**No repeats on add**: every add (CLI `playlist add`, `--playlist` on upload or update, the TUI toggles) first checks whether the playlist already has the video and skips the insert if it does. YouTube itself accepts the same video twice, which is how repeats got in. A lookup costs 1 quota unit; an add made within about a second of another add of the same video may still slip through, which `tidy` cleans up.
+
 **Tidy notes**: the copy of a repeated video that appears first is kept. Videos are ordered by the day they were published (UTC), newest first; videos published on the same day keep their current relative order, so a day of numbered talks stays in sequence. Private or deleted videos have no publish date and go last. If a move fails after duplicates were removed, the error says so; `--all` stops at the first playlist that fails. Reordering needs the playlist ordering set to *Manual* in YouTube Studio; otherwise tidy stops with a message saying so. Each delete or move is one API write (50 quota units of the default 10,000 per day), and tidy makes the fewest moves needed.
 
 **Multi-Playlist Support**: A talk can belong to multiple playlists. All assigned playlists are tracked in `talk_meta.json` under `"playlists": [{"id": "...", "title": "..."}]` and synchronized during upload, update, or when toggled in the TUI (<kbd>p</kbd>).
